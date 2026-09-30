@@ -172,9 +172,28 @@ def test_9_4_row_above_physical_bound_rejected(tmp_path: Path) -> None:
 # 9.6 Seed data sanity
 def test_9_6_shipped_rows_are_valid_and_sourced() -> None:
     table = load_benchmarks()  # raises BenchmarkError if any row fails the physical bound
+    assert table.rows
     for row in table.rows:
         assert row.source_url.startswith("https://")
         assert row.as_of is not None
+    # Section 5.4 row groups: Llama-3.1-70B on H100 at tp 4 or 8 with two or more
+    # concurrencies at one shape, and Llama-3.1-8B on H100 at tp 1.
+    llama70 = {
+        (r.input_len, r.output_len, r.concurrency)
+        for r in table.rows
+        if r.model_id == "meta-llama/Llama-3.1-70B-Instruct"
+        and r.gpu_id == "h100-sxm-80gb"
+        and r.tensor_parallel in (4, 8)
+        and r.dtype in ("bf16", "fp8")
+    }
+    shapes = {(i, o) for i, o, _ in llama70}
+    assert any(sum((i, o) == shape for i, o, _ in llama70) >= 2 for shape in shapes)
+    assert any(
+        r.model_id == "meta-llama/Llama-3.1-8B-Instruct"
+        and r.gpu_id == "h100-sxm-80gb"
+        and r.tensor_parallel == 1
+        for r in table.rows
+    )
 
 
 # 9.5 Table interpolation
