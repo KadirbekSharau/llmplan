@@ -73,7 +73,30 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   each, 0 dropped); BurstGPT_1 1,404,310 rows kept in 1.1 s; Azure 2024 code one-week
   16,803,695 rows in 38 s with 1.6 GB peak RSS, duration 604,799.9 s, `hourly_rps` over 7
   full days. Nearly all of the 2024 time is pandas' ISO-8601 parsing (about 2 s per million
-  rows); M6's 60-second preset budget should account for it.
+  rows); M6's 60-second preset budget should account for it. The one-week conversation
+  file (27,303,999 rows) took 68.5 s with 2.4 GB peak RSS, so the M6 Azure 2024 preset will
+  need the code file, a cached parse, or a faster timestamp path.
+- **Step 3 — `diurnal` is a relative shape; `rate_rps` is the peak-hour rate.** Section 6
+  says multipliers are "applied to `rate_rps`" and arrivals are thinned with probability
+  `mult / max(mult)` "after generating at the peak rate". Taking the peak rate as
+  `rate_rps * max(mult)` would make test 9.4's "all-equal multipliers leave the count
+  unchanged" true only for multipliers equal to 1; generating at `rate_rps` and thinning by
+  `mult / max(mult)` makes it true for any constant vector, so that reading was chosen. The
+  hour of day of an arrival is `floor(arrival_s / 3600) % 24`.
+- **Step 3 — The arrival at 0.0 is always kept under diurnal thinning.** Section 6 fixes the
+  first arrival at 0.0 and `Workload` requires it; thinning it away and re-normalizing would
+  shift every hour bucket. If `diurnal[0] == 0`, hour 0 therefore holds that single request.
+- **Step 3 — Arrivals are those at or before `duration_s`** (the first exponential arrival
+  past `duration_s` ends the process and is discarded).
+- **Step 3 — Test 9.4's zero-hour vector is zero for hours 6 to 17.** Hour 0 must be
+  non-zero (the kept first arrival) and hour 23 must be non-zero, because a trace's duration
+  ends at its last arrival: a silent last hour would make the trace shorter than one day
+  and `hourly_rps` None. The design does not say which 12 hours.
+- **Step 3 — Generator guards:** `seed >= 0` (numpy rejects negative seeds),
+  `rate_rps * duration_s <= 50,000,000` expected requests (memory guard for CLI input), and
+  the input distribution must have `lo >= 1` (a `Workload` needs `input_tokens >= 1`); each
+  raises `ValidationError`. `parse_distribution()` (CLI syntax of section 8) lives in
+  `synth.py` so the M6 UI can reuse it.
 
 ## Deviations from the design doc
 
@@ -89,6 +112,18 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   days divided by `full_days * 3600`, and arrivals in a trailing partial day are not
   bucketed. Consequence: a trace between 23 and 24 hours long gets an `hourly_rps` whose
   hour 23 is under-counted, exactly like the partial last rate window.
+
+- **Step 3 — Test 9.6's `peak_window_rps >= mean_rps` is false; the test asserts the true
+  bound instead.** With section 3's windows the last window is partial but divided by the
+  full `window_s`, while `mean_rps` divides by `duration_s`. Section 9.2's own expected values
+  break it: `peak_window_rps = 6 / 60 = 0.1 < mean_rps = 10 / 90 = 0.111`. More generally,
+  with `n_windows = floor(duration_s / window_s) + 1`, the counts sum to `n_requests` over
+  a span of `n_windows * window_s > duration_s`, so only
+  `max_count >= n_requests / n_windows` is guaranteed (e.g. two requests 10 s apart with
+  60 s windows: peak `2/60`, mean `2/10`). Test 9.6 asserts
+  `round(peak_window_rps * window_s) * n_windows >= n_requests`, i.e. the peak window rate
+  is at least the mean rate over the windows the trace spans. The other two properties are
+  unchanged. No expected value of 9.2 was changed.
 
 ## Questions for founder
 

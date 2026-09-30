@@ -1,7 +1,7 @@
 """Workload ingestion and characterization (M2): traces in, `Workload` and `WorkloadStats` out.
 
-Public API: `load_workload` (ARCHITECTURE.md section 5), `compute_stats`, and the models
-`Workload`, `WorkloadStats`, `Distribution`.
+Public API: `load_workload` (ARCHITECTURE.md section 5), `compute_stats`, `generate`, and
+the models `Workload`, `WorkloadStats`, `Distribution`.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from llmplan.workload import formats
 from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES
 from llmplan.workload.schema import Distribution, Workload, WorkloadStats
 from llmplan.workload.stats import compute_stats
+from llmplan.workload.synth import generate
 
 
 def load_workload(
@@ -38,5 +39,6 @@ __all__ = [
     "Workload",
     "WorkloadStats",
     "compute_stats",
+    "generate",
     "load_workload",
 ]

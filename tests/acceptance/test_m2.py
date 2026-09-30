@@ -7,10 +7,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from llmplan.errors import ValidationError, WorkloadFormatError
-from llmplan.workload import compute_stats, load_workload
+from llmplan.workload import Distribution, Workload, compute_stats, generate, load_workload
 from llmplan.workload.formats import detect
+from llmplan.workload.formats.generic_csv import write_csv
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -92,3 +95,97 @@ def test_9_3_ten_percent_invalid_rows_dropped_with_note(tmp_path: Path) -> None:
 def test_9_3_zero_window_rejected() -> None:
     with pytest.raises(ValidationError):
         compute_stats(load_workload(FIXTURES / "workload_10.csv"), window_s=0)
+
+
+# 9.4 Synthetic
+IN_TOKENS = Distribution(kind="lognormal", mean=6.2, sigma=0.8, lo=16, hi=4096)
+OUT_TOKENS = Distribution(kind="lognormal", mean=5.5, sigma=0.9, lo=1, hi=1024)
+
+
+def _synth(duration_s: float = 3600, diurnal: tuple[float, ...] | None = None) -> Workload:
+    return generate(
+        rate_rps=5,
+        duration_s=duration_s,
+        input_tokens=IN_TOKENS,
+        output_tokens=OUT_TOKENS,
+        seed=1,
+        diurnal=diurnal,
+    )
+
+
+def test_9_4_synthetic_is_deterministic_and_bounded(tmp_path: Path) -> None:
+    first, second = tmp_path / "a.csv", tmp_path / "b.csv"
+    write_csv(_synth(), first)
+    write_csv(_synth(), second)
+    assert first.read_bytes() == second.read_bytes()
+    frame = _synth().frame
+    assert len(frame) == pytest.approx(18_000, rel=0.05)
+    assert frame["arrival_s"].iloc[0] == 0.0
+    assert frame["input_tokens"].between(IN_TOKENS.lo, IN_TOKENS.hi).all()
+    assert frame["output_tokens"].between(OUT_TOKENS.lo, OUT_TOKENS.hi).all()
+
+
+def test_9_4_equal_diurnal_multipliers_keep_the_count() -> None:
+    assert len(_synth(diurnal=(1.0,) * 24).frame) == pytest.approx(18_000, rel=0.05)
+
+
+def test_9_4_zero_diurnal_hours_give_zero_hourly_rps() -> None:
+    # Hours 0 and 23 stay non-zero: the first arrival is at 0.0, and a trace's duration ends
+    # at its last arrival, so a silent hour 23 would shorten the trace below one day.
+    zero_hours = set(range(6, 18))
+    diurnal = tuple(0.0 if h in zero_hours else 1.0 for h in range(24))
+    hourly = compute_stats(_synth(duration_s=86_400, diurnal=diurnal)).hourly_rps
+    assert hourly is not None
+    assert {h for h, rps in enumerate(hourly) if rps == 0.0} == zero_hours
+
+
+# 9.6 Property tests
+distributions = st.one_of(
+    st.builds(Distribution, kind=st.just("fixed"), value=st.integers(1, 5000)),
+    st.builds(
+        Distribution,
+        kind=st.just("lognormal"),
+        mean=st.floats(0, 9),
+        sigma=st.floats(0, 2),
+        hi=st.integers(1, 131_072),
+    ),
+    st.integers(1, 4000).flatmap(
+        lambda lo: st.builds(
+            Distribution, kind=st.just("uniform"), lo=st.just(lo), hi=st.integers(lo, 8000)
+        )
+    ),
+)
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    rate_rps=st.floats(0.01, 50),
+    duration_s=st.floats(1, 900),
+    input_tokens=distributions,
+    output_tokens=distributions,
+    seed=st.integers(0, 2**32 - 1),
+    window_s=st.floats(0.5, 300),
+)
+def test_9_6_properties(
+    rate_rps: float,
+    duration_s: float,
+    input_tokens: Distribution,
+    output_tokens: Distribution,
+    seed: int,
+    window_s: float,
+) -> None:
+    workload = generate(
+        rate_rps=rate_rps,
+        duration_s=duration_s,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        seed=seed,
+    )
+    stats = compute_stats(workload, window_s=window_s)
+    assert np.all(np.diff(workload.frame["arrival_s"].to_numpy()) >= 0)
+    # Design text: peak_window_rps >= mean_rps. That is false whenever the last window is
+    # partial (9.2 itself has peak 0.1 < mean 10/90); see M2_NOTES.md. The true bound is the
+    # peak against the mean over the windows the trace spans:
+    peak_count = round(stats.peak_window_rps * stats.window_s)
+    assert peak_count * stats.n_windows >= stats.n_requests
+    assert stats.input_tokens_p99 >= stats.input_tokens_p95 >= stats.input_tokens_p50
