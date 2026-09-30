@@ -20,16 +20,20 @@ if TYPE_CHECKING:
     from llmplan.perf.estimate import PerfEstimate, StatsLike
     from llmplan.planner.request import PlanRequest
     from llmplan.planner.result import PlanResult
+    from llmplan.workload import Workload, WorkloadStats
 
 
 class Renderer(Protocol):
-    """Formats the results of each command (`fit`, `model-info`, `gpus`, `perf ...`, `plan`)."""
+    """Formats the results of each command (`fit`, `model-info`, `gpus`, `workload stats`,
+    `perf ...`, `plan`)."""
 
     def fit(self, request: FitRequest, result: FitResult) -> str: ...
 
     def model_info(self, spec: ModelSpec) -> str: ...
 
     def gpus(self, gpus: Mapping[str, GPUSpec]) -> str: ...
+
+    def workload_stats(self, workload: Workload, stats: WorkloadStats) -> str: ...
 
     def perf_estimate(
         self,

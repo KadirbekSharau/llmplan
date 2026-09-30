@@ -17,6 +17,8 @@ from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import PlanResult
 from llmplan.render import register
 from llmplan.render.plan_text import plan_text
+from llmplan.render.workload_text import workload_stats_text
+from llmplan.workload import Workload, WorkloadStats
 
 LABEL_WIDTH = 10
 
@@ -126,6 +128,9 @@ class TextRenderer:
                 f"{'yes' if gpu.nvlink else 'no':>8}  {gpu.as_of.isoformat()}"
             )
         return "\n".join(rows) + "\n"
+
+    def workload_stats(self, workload: Workload, stats: WorkloadStats) -> str:
+        return workload_stats_text(workload, stats)
 
     def perf_estimate(
         self,

@@ -18,6 +18,7 @@ from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import PlanResult
 from llmplan.render import register
 from llmplan.types import KVDType
+from llmplan.workload import Workload, WorkloadStats
 
 REQUEST_FIELDS = {"tensor_parallel", "dtype", "quantize_embeddings", "context_len"}
 
@@ -54,6 +55,17 @@ class JsonRenderer:
 
     def gpus(self, gpus: Mapping[str, GPUSpec]) -> str:
         return _dumps([gpu.model_dump(mode="json") for gpu in gpus.values()])
+
+    def workload_stats(self, workload: Workload, stats: WorkloadStats) -> str:
+        return _dumps(
+            {
+                "source": workload.source,
+                "format": workload.format,
+                "dropped_rows": workload.dropped_rows,
+                "notes": list(workload.notes),
+                "stats": stats.model_dump(mode="json"),
+            }
+        )
 
     def perf_estimate(
         self,
