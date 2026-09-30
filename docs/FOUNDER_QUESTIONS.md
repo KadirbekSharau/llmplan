@@ -10,3 +10,5 @@ answer in the next milestone.
 | 2 | 2026-09-30 | Rename the project directory from `ultrascheduler` to `llmplan` to match the package? | Left as is; docs and package use `llmplan`. | |
 | 3 | 2026-09-30 | Per-agent reasoning effort cannot be set by the CTO when spawning agents; they run at the default effort for Opus. Acceptable, or do you want to set a session-level default? | Default effort used. | |
 | 4 | 2026-09-30 | M3: accept vendor-published benchmark rows measured on TensorRT-LLM rather than vLLM? | Yes, with `engine` recorded per row; the planner prefers rows matching the user's engine. | |
+| 5 | 2026-09-30 | M6 hosting: Streamlit Community Cloud (free, needs a public repo) or a paid container host with a private repo? | Docker image built either way; decide before launch. | |
+| 6 | 2026-09-30 | Public app name and domain for launch posts? | "llmplan". | |
