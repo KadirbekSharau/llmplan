@@ -31,6 +31,10 @@ class ValidationError(LLMPlanError):
     """Input failed validation at a package boundary."""
 
 
+class WorkloadFormatError(ValidationError):
+    """M2: a trace file does not match its format (bad header, ambiguous, mostly invalid)."""
+
+
 class UnknownRegistryKey(LLMPlanError):
     """A registry lookup used a key that was never registered."""
 

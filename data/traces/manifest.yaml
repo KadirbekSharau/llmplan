@@ -1,0 +1,36 @@
+# Public LLM inference traces downloadable with `llmplan traces fetch NAME --dest DIR --yes`.
+# The data files are never committed. sha256 and size_bytes were observed by downloading
+# each file once on as_of; the Azure 2024 and BurstGPT values match the SHA-256 digests
+# GitHub publishes for those release assets.
+# All five traces are licensed CC-BY-4.0 (cite the dataset papers when publishing results).
+# Azure 2023 URLs are pinned to commit 7909210 of Azure/AzurePublicDataset.
+- name: azure2023-code
+  url: https://raw.githubusercontent.com/Azure/AzurePublicDataset/790921015d50dd6aae7f7e47f39ba0e235ad6b08/data/AzureLLMInferenceTrace_code.csv
+  sha256: 54e9a6d2a4bd06ba1e060304b900abbc74cbea53de96506e60fe5bb4f2277fb6
+  size_bytes: 320117
+  as_of: 2026-09-30
+  license_url: https://github.com/Azure/AzurePublicDataset/blob/master/LICENSE
+- name: azure2023-conv
+  url: https://raw.githubusercontent.com/Azure/AzurePublicDataset/790921015d50dd6aae7f7e47f39ba0e235ad6b08/data/AzureLLMInferenceTrace_conv.csv
+  sha256: 2f1e5b666d4e3055fdbba98598ce2ec307767b9064e03e2fa46676dbcc7d0bf8
+  size_bytes: 719188
+  as_of: 2026-09-30
+  license_url: https://github.com/Azure/AzurePublicDataset/blob/master/LICENSE
+- name: azure2024-code
+  url: https://github.com/Azure/AzurePublicDataset/releases/download/dataset-llm-2024/AzureLLMInferenceTrace_code_1week.csv
+  sha256: 71de5c55cbc35f8f1ed0b6b7806b4cd1e9764b0058469725a6aac98023a1448f
+  size_bytes: 691989454
+  as_of: 2026-09-30
+  license_url: https://github.com/Azure/AzurePublicDataset/blob/master/LICENSE
+- name: azure2024-conv
+  url: https://github.com/Azure/AzurePublicDataset/releases/download/dataset-llm-2024/AzureLLMInferenceTrace_conv_1week.csv
+  sha256: a0cc9b969a9bbf0fd811802cbf4323edd3a209ace791e3799ad4f9207f213941
+  size_bytes: 1135195393
+  as_of: 2026-09-30
+  license_url: https://github.com/Azure/AzurePublicDataset/blob/master/LICENSE
+- name: burstgpt-1
+  url: https://github.com/HPMLL/BurstGPT/releases/download/v2.0/BurstGPT_1.csv
+  sha256: 4bb3783693d0a435686fbfc885615d2349bd067239079fa4b749f2e679e12122
+  size_bytes: 52283111
+  as_of: 2026-09-30
+  license_url: https://github.com/HPMLL/BurstGPT/blob/main/LICENSE

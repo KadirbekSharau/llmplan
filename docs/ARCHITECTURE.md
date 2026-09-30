@@ -119,10 +119,14 @@ llmplan/
     kv_cache.py          # bytes per token, with TP and GQA handling
     engine.py            # EngineProfile (vLLM defaults), overhead model
     fit.py               # fit() -> FitResult  (M1 public API)
-  workload/              # M2
-    schema.py            # Request rows, Workload
-    formats/             # registry: azure2023, azure2024, burstgpt, csv
-    stats.py             # peak windows, token distributions
+  workload/              # M2 (implemented)
+    __init__.py          # load_workload() (M2 public API)
+    schema.py            # Workload, Distribution, WorkloadStats
+    formats/             # registry: csv (generic_csv.py), azure2023/azure2024 (azure.py),
+                         #   burstgpt; reader.py = chunked parsing + row validation
+    stats.py             # compute_stats(): peak windows, token percentiles, diurnal
+    synth.py             # deterministic synthetic generator
+    fetch.py             # consented, checksum-verified public trace download
   perf/                  # M3
     config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
     estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
@@ -145,12 +149,14 @@ llmplan/
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
+  cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
   prices.yaml
   benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
+  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (data files never committed)
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -317,7 +323,44 @@ class BenchmarkTable(BaseModel, frozen=True):
     aliases: dict[str, str]             # model id -> canonical id; canonical(id) method
 ```
 
-Later milestones add `Workload`, `SLO`, `PlanRequest`, `PlanResult`, `Timeline` following
+```python
+# llmplan/workload/schema.py (M2)
+class Workload(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    source: str                 # path or "synthetic:<seed>"
+    format: str                 # registry key, or "synthetic"
+    frame: pd.DataFrame         # exactly these columns, default RangeIndex, >= 1 row:
+                                #   arrival_s float64 >= 0, non-decreasing, first == 0.0
+                                #   input_tokens int64 >= 1; output_tokens int64 >= 0
+                                #   model, tenant: pandas "string" (pd.NA), may be all <NA>
+    dropped_rows: int           # rows removed during parsing
+    notes: tuple[str, ...] = ()
+
+class Distribution(BaseModel, frozen=True):       # synthetic token lengths
+    kind: Literal["fixed", "lognormal", "uniform"]
+    value: int | None = None    # fixed only
+    mean: float | None = None   # lognormal only: mean of the underlying normal
+    sigma: float | None = None  # lognormal only: sigma of the underlying normal
+    lo: int = 1                 # clip / uniform bounds, inclusive
+    hi: int = 131_072
+
+class WorkloadStats(BaseModel, frozen=True):      # compute_stats(workload, window_s=60.0)
+    n_requests: int
+    duration_s: float           # max(arrival_s) - min(arrival_s)
+    window_s: float
+    n_windows: int
+    mean_rps: float             # n_requests / duration_s (0.0 if duration_s == 0)
+    peak_window_rps: float      # max over windows of count / window_s
+    peak_window_index: int
+    input_tokens_p50: float; input_tokens_p95: float; input_tokens_p99: float
+    input_tokens_mean: float; input_tokens_max: int
+    output_tokens_p50: float; output_tokens_p95: float; output_tokens_p99: float
+    output_tokens_mean: float; output_tokens_max: int
+    peak_input_tokens_per_s: float    # max over windows of sum(input_tokens) / window_s
+    peak_output_tokens_per_s: float
+    hourly_rps: tuple[float, ...] | None   # 24 entries when >= 24 hour windows, else None
+```
+
+Later milestones add `SLO`, `PlanRequest`, `PlanResult`, `Timeline` following
 the same conventions. Their fields are specified in their design docs and copied here when
 merged.
 
@@ -332,7 +375,7 @@ Downstream code calls only these.
 | M1 (implemented) | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
 | M1 (implemented) | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
 | M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
-| M2 | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None) -> Workload` |
+| M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 200 MB cap) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
@@ -349,7 +392,7 @@ no entry points, until an external contributor needs one.
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
 | Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
-| Trace formats | `workload/formats` | `parse(path) -> Workload` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
+| Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(path, *, max_bytes) -> Workload`; `detect(path) -> str` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
@@ -364,6 +407,7 @@ class CatalogError(LLMPlanError): ...          # missing GPU id, bad YAML row
 class UnsupportedArchitecture(CatalogError):   # carries `field` that could not be derived
 class FetchError(CatalogError): ...            # HF fetch failed / disallowed id
 class ValidationError(LLMPlanError): ...       # wraps pydantic errors at boundaries
+class WorkloadFormatError(ValidationError): ... # M2: trace header/format mismatch, >50% bad rows
 class UnknownRegistryKey(LLMPlanError): ...    # registry get() with an unregistered key (section 6)
 class InfeasiblePlan(LLMPlanError): ...        # M4: no fleet satisfies constraints; carries reason
 class SolverError(LLMPlanError): ...           # M4: backend failure / time limit without incumbent
@@ -388,6 +432,10 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
   whole load fails with `BenchmarkError` naming the file, row index, and model id.
 - Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
+- `data/traces/manifest.yaml` (M2): list of `TraceSource` rows
+  (`llmplan.workload.fetch`: `name`, `url | None`, `sha256 | None`, `size_bytes | None`,
+  `as_of`, `license_url`). `llmplan traces fetch` downloads only with `--yes`, caps at
+  2 GiB, verifies the SHA-256, and never writes into the repo unless `--dest` points there.
 
 ---
 
