@@ -10,8 +10,8 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M1 | done | main (21c6875) |
 | M2 | done | m2-workload, PR #2 (4c6621b) |
 | M3 | done | m3-perf, PR #1 (6675804) |
-| M4 | ready for review | m4-planner |
-| M5 | designed | m5-simulate |
+| M4 | done | m4-planner, PR #3 (141115e) |
+| M5 | in progress | m5-simulate |
 | M6 | designed | m6-ui |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
@@ -109,6 +109,17 @@ Scope:
 Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a laptop CPU.
 
 ---
+
+## Later (not scheduled; recorded so they are not lost)
+
+- **Per-request-size demand classes.** M4 plans every replica for the workload's mean
+  request shape. Mélange's savings come largely from routing small and large requests to
+  different GPU types. Extending the formulation with demand classes (bucketed by input and
+  output length) and per-class capacities is a natural M7. Found during M4 (see M4_NOTES.md).
+- **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
+- **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
+- **Stale marker.** `tests/acceptance/test_m3.py` still carries a `TODO(M2)` for importing
+  the real `WorkloadStats`; M5 should replace the local copy with the M2 model.
 
 ## Dependencies
 

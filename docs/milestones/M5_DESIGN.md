@@ -183,6 +183,9 @@ the PNG signature; runs headless (no display).
 **9.10 Performance.** A synthetic 200k-request workload on 4 replicas replays in under 30 s
 (mark `@pytest.mark.slow`; excluded from the default run but present).
 
+## 9b. Carry-over item (in scope for M5)
+- Replace the local `WorkloadStats` copy in `tests/acceptance/test_m3.py` with an import of `llmplan.workload.schema.WorkloadStats` and delete the `TODO(M2)`.
+
 ## 10. Implementation order
 1. Replica state, event loop, per-request records; 9.1, 9.2, 9.4.
 2. Routing registry; 9.3, 9.5.
