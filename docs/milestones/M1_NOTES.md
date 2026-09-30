@@ -59,6 +59,25 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
 - **PR 4 — `ValidationError` for tensor parallel / context length is raised by `fit()`**, not
   by `FitRequest` construction: pydantic validators can only raise pydantic's own error,
   and test 9.6 expects `llmplan.errors.ValidationError`.
+- **PR 5 — Plain-text renderer, no `rich`.** Aligned plain text is deterministic and enough
+  for the section 8 content; `rich` was dropped from the explicit dependencies (typer
+  still pulls it in transitively).
+- **PR 5 — `render/json_render.py`** rather than `render/json.py`, to avoid shadowing the
+  stdlib module; the registry key is still `json`.
+- **PR 5 — Fit JSON layout:** `FitResult` fields at top level (test 9.8 reads `fits`), plus
+  `request` (tensor_parallel, dtype, quantize_embeddings, context_len), `model`, `gpu`,
+  `engine`. Output is byte-identical across runs.
+- **PR 5 — Errors print one line to stderr as `error: <message>`**; pydantic validation
+  errors from CLI values (e.g. `--gpu-mem-util 1.5`) map to exit 2 naming the field. An
+  `LLMPlanError` subclass with no mapping would exit 1 (none exists today).
+- **DEFINITION_OF_DONE.md appeared mid-milestone** (after PR 2). Its rules were applied from
+  PR 3 on (coverage gate, notes structure, CHANGELOG, README examples). Its section 4 check
+  `uv run llmplan --help` cannot pass on PR 1 to PR 4 because M1_DESIGN.md section 10 puts
+  the CLI in PR 5; every other section 4 check passes on every commit.
+- **`docs/MILESTONES.md` status is left to the CTO.** It is maintained concurrently on
+  `main`, and DEFINITION_OF_DONE.md section 10 has the CTO update it on approval.
+- **Not pushed.** An `origin` remote appeared during the work; the assignment said not to
+  push.
 
 ## Deviations from the design doc
 
@@ -104,6 +123,11 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
   dtype width (`quantize_embeddings=True`), which holds for any spec, and additionally
   `bf16 >= int8 >= int4` on the default path, which also holds for any spec
   (`P + E <= 2 P`, `0.5 (P - E) + 2 E <= P + E`). No expected value was loosened.
+- **PR 5 — Renderer interface is a protocol with one method per result type**
+  (`fit(request, result)`, `model_info(spec)`, `gpus(catalog)`) instead of
+  `render(result) -> str | bytes`. The fit output needs the request (model, GPU, engine,
+  context) as well as the `FitResult`, and each command renders a different type.
+  ARCHITECTURE.md sections 3 and 6 updated.
 
 ## Questions for founder
 

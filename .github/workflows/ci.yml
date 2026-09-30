@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Sync (locked)
-        run: uv sync --locked
+        run: uv sync --locked --all-extras
       - name: Lint
         run: uv run ruff check
       - name: Format
@@ -28,3 +28,7 @@ jobs:
         run: uv run pytest
       - name: Audit dependencies
         run: uv audit
+      - name: Build
+        run: uv build
+      - name: CLI entry point
+        run: uv run llmplan --help

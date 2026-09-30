@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from typer.testing import CliRunner
 
 from llmplan.catalog import architectures
 from llmplan.catalog.hardware import GPUSpec, load_gpus, load_prices
 from llmplan.catalog.models import HttpConfigFetcher, ModelSpec, load_model
+from llmplan.cli import app
 from llmplan.errors import CatalogError, FetchError, UnsupportedArchitecture, ValidationError
 from llmplan.memory.engine import EngineProfile
 from llmplan.memory.fit import FitRequest, FitResult, fit
@@ -264,3 +267,25 @@ def test_9_7_kv_replication_never_loses_kv(spec: ModelSpec, kv_dtype: str) -> No
     for tp in _divisors(spec.num_attention_heads):
         per_gpu = kv_bytes_per_token_per_gpu(spec, kv_dtype, tp)  # type: ignore[arg-type]  # sampled KVDType
         assert per_gpu * tp >= total
+
+
+# 9.8 CLI smoke
+FIT_ARGS = ["fit", "--model", "fixture:llama3-70b", "--gpu", "h100-sxm-80gb"]
+
+
+def test_9_8_cli_fit_tp2_json() -> None:
+    result = CliRunner().invoke(app, [*FIT_ARGS, "--tp", "2", "--format", "json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["fits"] is True
+
+
+def test_9_8_cli_fit_tp1_is_a_valid_false_answer() -> None:
+    result = CliRunner().invoke(app, [*FIT_ARGS, "--tp", "1", "--format", "json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["fits"] is False
+
+
+def test_9_8_cli_unknown_gpu_exits_3() -> None:
+    args = ["fit", "--model", "fixture:llama3-70b", "--gpu", "no-such-gpu"]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 3

@@ -135,6 +135,9 @@ llmplan/
     replay.py
     timeline.py
   render/                # output adapters: text table, JSON, vLLM command line, plots
+    __init__.py          # Renderer protocol, register(), get()
+    text.py              # M1
+    json_render.py       # M1 (named to avoid shadowing stdlib json)
     vllm_cmd.py
     ...
   cli.py                 # typer app; thin
@@ -257,9 +260,9 @@ Downstream code calls only these.
 
 | Milestone | Function | Signature |
 |---|---|---|
-| M1 | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
-| M1 | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
-| M1 | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
+| M1 (implemented) | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
+| M1 (implemented) | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
+| M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
 | M2 | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None) -> Workload` |
 | M3 | `llmplan.perf.estimate` | `(model, gpu, tp, config, workload_stats, *, backend="table") -> PerfEstimate` |
 | M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
@@ -279,7 +282,7 @@ no entry points, until an external contributor needs one.
 | Trace formats | `workload/formats` | `parse(path) -> Workload` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf` | `PerfBackend` protocol | `table` (M3), `vidur` (optional) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Renderers | `render` | `render(result) -> str \| bytes` | `text`, `json`, `vllm_cmd` |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
 
 ---
 
