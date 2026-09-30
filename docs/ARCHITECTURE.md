@@ -214,7 +214,7 @@ class PriceRow(BaseModel, frozen=True):
 
 # llmplan/memory/engine.py
 class EngineProfile(BaseModel, frozen=True):
-    engine: Literal["vllm"]     # extend later
+    engine: Literal["vllm"] = "vllm"   # extend later
     gpu_memory_utilization: float = 0.9     # 0 < x <= 1
     max_num_batched_tokens: int = 8192
     fixed_overhead_bytes: int = 1 * 2**30   # CUDA context, graphs; documented assumption
@@ -225,9 +225,10 @@ class EngineProfile(BaseModel, frozen=True):
 class FitRequest(BaseModel, frozen=True):
     model: ModelSpec
     gpu: GPUSpec
-    engine: EngineProfile
+    engine: EngineProfile = EngineProfile()
     tensor_parallel: int = 1    # ge=1
     dtype: DType = "bf16"
+    quantize_embeddings: bool = False   # M1 design 4.2: int8/int4 keep 16-bit embeddings
     context_len: int            # tokens per sequence used for concurrency estimate
 
 class FitResult(BaseModel, frozen=True):

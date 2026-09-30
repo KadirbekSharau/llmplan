@@ -47,6 +47,19 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
 - **PR 3 — A100 40GB SXM source is the NVIDIA A100 datasheet PDF**; the current A100 web
   page no longer lists the 40GB SXM column.
 
+- **PR 4 — Byte arithmetic is exact integer arithmetic.** `dtypes` stores bits per element;
+  `bytes_for(n, dtype) = ceil(n * bits / 8)` in integers, so no float rounding enters
+  weight or KV bytes. `bytes_per_element()` still returns the section 4.2 floats.
+- **PR 4 — `activation_bytes` is rounded up** (`ceil`) when `activation_multiplier` is not an
+  integer; with defaults it is exact (2,147,483,648 for hidden 8192).
+- **PR 4 — Extra informational notes** beyond the required ones: KV-head replication when
+  `tensor_parallel > num_kv_heads`, 16-bit embeddings for int8/int4, explicit `head_dim`
+  differing from `hidden_size // num_attention_heads` (open question 12: trusted, noted),
+  and `param_count_override` use. The overhead note echoes non-default engine constants.
+- **PR 4 — `ValidationError` for tensor parallel / context length is raised by `fit()`**, not
+  by `FitRequest` construction: pydantic validators can only raise pydantic's own error,
+  and test 9.6 expects `llmplan.errors.ValidationError`.
+
 ## Deviations from the design doc
 
 - **PR 1 — `UnknownRegistryKey` added to the error hierarchy.** ARCHITECTURE.md section 6
@@ -76,6 +89,21 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
   `nvlink: false` (a required bool) carries a TODO(M3) since it is not documented either way.
 - **PR 3 — `pytest-cov` added as a dev dependency** (DEFINITION_OF_DONE.md section 3
   requires 90% coverage). Not in section 11's list.
+
+- **PR 4 — `FitRequest.quantize_embeddings: bool = False` added** (section 4.2 names it a
+  `FitRequest` field; ARCHITECTURE.md section 4 did not list it). `FitRequest.engine`
+  defaults to `EngineProfile()` and `EngineProfile.engine` defaults to `"vllm"` (its only
+  value) so "default EngineProfile" is constructible without arguments. ARCHITECTURE.md
+  section 4 updated.
+- **PR 4 — Test 9.7(a) corrected; the stated property is false.** With the default 16-bit
+  embeddings, `weight_bytes(int4) = 0.5 (P - E) + 2 E` and `weight_bytes(fp8) = P`, so
+  int4 > fp8 exactly when `E > P / 3` (embedding parameters above a third of the total).
+  Hypothesis found `hidden 32, layers 1, intermediate 1, vocab 34`: P = 6,464 (E = 2,176),
+  fp8 6,464 B, int4 6,496 B. No shipped fixture is affected (llama3-8b: E/P = 13%). The test
+  now asserts the full width chain `fp32 >= bf16 >= fp8 >= int4` with every parameter at the
+  dtype width (`quantize_embeddings=True`), which holds for any spec, and additionally
+  `bf16 >= int8 >= int4` on the default path, which also holds for any spec
+  (`P + E <= 2 P`, `0.5 (P - E) + 2 E <= P + E`). No expected value was loosened.
 
 ## Questions for founder
 
