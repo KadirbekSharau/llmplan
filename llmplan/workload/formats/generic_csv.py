@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from llmplan.errors import WorkloadFormatError
+from llmplan.errors import ValidationError, WorkloadFormatError
 from llmplan.workload.formats import register
 from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, TimeKind, read_header, read_trace
 from llmplan.workload.schema import Workload
@@ -53,8 +53,12 @@ def write_csv(workload: Workload, path: Path) -> None:
 
     Always writes `arrival_s`, `input_tokens`, `output_tokens`; writes `model` and `tenant`
     only when they hold at least one value. Floats use their shortest round-trip repr and
-    lines end in `\\n`, so equal workloads produce byte-identical files.
+    lines end in `\\n`, so equal workloads produce byte-identical files. Raises
+    `ValidationError` when the file cannot be written.
     """
     frame = workload.frame
     columns = ["arrival_s", *_TOKENS, *(c for c in _LABELS if frame[c].notna().any())]
-    frame.to_csv(path, columns=columns, index=False, lineterminator="\n")
+    try:
+        frame.to_csv(path, columns=columns, index=False, lineterminator="\n")
+    except OSError as exc:
+        raise ValidationError(f"cannot write {path}: {exc.strerror or exc}") from None

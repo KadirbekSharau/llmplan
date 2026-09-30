@@ -124,6 +124,21 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
 - **Step 4 — Not verified against the live endpoints with the fetch command itself**
   (network use was limited to one download per file); the HTTP path is covered with
   `httpx.MockTransport`, and the pinned URLs were checked when hashing.
+- **Step 5 — CLI details.** `workload stats` uses `--format` for the trace format and
+  `--format-out` for the output, as section 8 specifies (M1 commands use `--format` for
+  output). `workload synth` defaults `--in-tokens lognormal:6.2:0.8`, `--out-tokens
+  lognormal:5.5:0.9` (the section 8 example values) and `--seed 0`; `--rps`, `--duration`,
+  and `--out` are required. `--out` is overwritten if it exists (it is a path the user
+  named); an unwritable path raises `ValidationError` (exit 2). The stats JSON is
+  `{source, format, dropped_rows, notes, stats}` with `stats` the `WorkloadStats` fields; it
+  is byte-identical across runs.
+- **Step 5 — `docs/MILESTONES.md` status is left to the CTO**, as in M1: the done status needs
+  the merge commit hash, which only exists after review.
+- **Package growth.** M2 adds about 1,140 lines under `llmplan/` (largest module
+  `formats/reader.py`, 171 lines; none near 300). The design asks for four formats, a
+  validated schema, statistics, a generator, a checksum-verified downloader, and three CLI
+  commands; each lives in its own small module, and the only shared machinery
+  (`formats/reader.py`) exists so the four parsers stay 45 to 65 lines each.
 
 ## Deviations from the design doc
 
@@ -131,15 +146,15 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   `duration_s >= 86_400`.** Section 9.4 requires `hourly_rps` for a synthetic run with
   `duration_s=86_400`, but a Poisson trace generated over `[0, 86_400]` ends a fraction of a
   second before 86,400 s (the next arrival would fall past the end), so `duration_s` is
-  always slightly below 86,400 and the literal rule would return None. The same happens for
-  the real Azure 2024 one-week files, which end at 23:59:59.9 on their seventh day. Hours
+  always slightly below 86,400 and the literal rule would return None. The real Azure 2024
+  one-week files show the same edge: they end at 23:59:59.9 on their seventh day, so
+  counting full days as `floor(duration_s / 86_400)` would give 6 and drop a day. Hours
   now follow the window convention of section 3: the trace covers
   `floor(duration_s / 3600) + 1` hour windows (the last may be partial), `full_days` is that
   count // 24, `hourly_rps[h]` is the count of arrivals in hour-of-day `h` within those full
   days divided by `full_days * 3600`, and arrivals in a trailing partial day are not
   bucketed. Consequence: a trace between 23 and 24 hours long gets an `hourly_rps` whose
   hour 23 is under-counted, exactly like the partial last rate window.
-
 - **Step 3 — Test 9.6's `peak_window_rps >= mean_rps` is false; the test asserts the true
   bound instead.** With section 3's windows the last window is partial but divided by the
   full `window_s`, while `mean_rps` divides by `duration_s`. Section 9.2's own expected values
@@ -151,6 +166,20 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   `round(peak_window_rps * window_s) * n_windows >= n_requests`, i.e. the peak window rate
   is at least the mean rate over the windows the trace spans. The other two properties are
   unchanged. No expected value of 9.2 was changed.
+- **Steps 1 to 4 — ARCHITECTURE.md interface updates.** (a) `load_workload` gains
+  `max_bytes` (see implementation notes). (b) The trace-format registry interface was
+  `parse(path) -> Workload`; it is now the `TraceFormat` protocol
+  `matches(header, first_row) -> bool` plus `parse(path, *, max_bytes) -> Workload`, because
+  section 4 requires `detect(path)` by header inspection (each format must recognize its own
+  header, and the two Azure releases need the first data row) and a `max_bytes` argument.
+  (c) `WorkloadFormatError`, named by the design, was added to the error hierarchy in
+  section 7. (d) Section 4 lists the M2 models; section 3 and 8 list the new modules and
+  the trace manifest.
+- **Step 5 — Workload stats renderers live in `llmplan/cli_workload.py`, not in the
+  `llmplan.render` registry.** ARCHITECTURE.md section 6 says later milestones add a method
+  per result type to the `Renderer` protocol. M3 is extending `render/` on a parallel
+  branch and this branch was scoped to stay out of it, so `stats_text` and `stats_json` are
+  two plain functions next to the command, marked `TODO(M4)` to move into `render/`.
 
 ## Questions for founder
 

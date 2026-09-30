@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   counts; GPU and price catalogs (`data/gpus.yaml`, `data/prices.yaml`) with sources;
   exact weight and KV-cache arithmetic and the vLLM overhead model behind `fit()`; text and
   JSON renderers; CLI commands `llmplan fit`, `llmplan model-info`, `llmplan gpus`.
+- M2: `Workload`, `WorkloadStats`, and `Distribution` models; trace parsers for generic CSV,
+  Azure LLM inference 2023 and 2024, and BurstGPT with header detection and row validation;
+  `compute_stats()` (peak windows, token percentiles, diurnal profile); a seeded synthetic
+  trace generator; a checksum-verified public trace manifest and fetcher; CLI commands
+  `llmplan workload stats`, `llmplan workload synth`, `llmplan traces fetch`.
 - M3: performance model. `ReplicaConfig`, `PerfEstimate`, the `PerfBackend` protocol, and
   `llmplan.perf.estimate()` with `auto`/`roofline`/`table` backends; roofline bounds from
   M1 memory arithmetic and catalog bandwidth/TFLOPS; benchmark table (`data/benchmarks/`)

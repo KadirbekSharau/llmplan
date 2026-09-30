@@ -50,6 +50,37 @@ uv run llmplan model-info --model fixture:qwen2.5-7b
 uv run llmplan gpus --format json
 ```
 
+**`llmplan workload stats`** — summarize a request trace: mean and peak request rate over
+`--window` seconds, token percentiles, peak token rates, and an hour-of-day profile when the
+trace covers a day. The format (`csv`, `azure2023`, `azure2024`, `burstgpt`) is detected from
+the header unless `--format` is given.
+
+```
+uv run llmplan workload stats --trace tests/fixtures/workload_10.csv --window 60
+```
+
+Options: `--format {auto,csv,azure2023,azure2024,burstgpt}`, `--window 60`,
+`--format-out {text,json}`. The generic `csv` format has columns `arrival_s` (seconds) or
+`timestamp` (ISO-8601), `input_tokens`, `output_tokens`, and optionally `model`, `tenant`.
+
+**`llmplan workload synth`** — write a deterministic synthetic trace (Poisson arrivals) in the
+generic `csv` format, for users without a trace.
+
+```
+uv run llmplan workload synth --rps 5 --duration 3600 --in-tokens lognormal:6.2:0.8 --out-tokens lognormal:5.5:0.9 --seed 1 --out synth.csv
+```
+
+Token distributions: `fixed:N`, `lognormal:MEAN:SIGMA[:LO:HI]` (parameters of the underlying
+normal), `uniform:LO:HI`.
+
+**`llmplan traces fetch`** — download a public trace listed in `data/traces/manifest.yaml`
+(`azure2023-code`, `azure2023-conv`, `azure2024-code`, `azure2024-conv`, `burstgpt-1`). It
+refuses to run without `--yes`, verifies the recorded SHA-256, and caps downloads at 2 GiB.
+
+```
+uv run llmplan traces fetch azure2023-conv --dest ~/traces --yes
+```
+
 **`llmplan perf estimate`** — throughput, TTFT, and TPOT of one replica under a workload's
 token distribution. `--backend auto` (default) interpolates published benchmark rows
 (`data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request

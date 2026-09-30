@@ -17,7 +17,7 @@ from llmplan import render
 from llmplan.catalog.hardware import load_gpus
 from llmplan.catalog.models import ModelSpec, load_model
 from llmplan.cli_perf import perf_app
-from llmplan.cli_workload import traces_app
+from llmplan.cli_workload import traces_app, workload_app
 from llmplan.errors import (
     CatalogError,
     InfeasiblePlan,
@@ -134,4 +134,5 @@ def gpus_command(gpus: GpusOpt = None, fmt: FormatOpt = "text") -> None:
 
 
 app.add_typer(perf_app, name="perf")
+app.add_typer(workload_app, name="workload")
 app.add_typer(traces_app, name="traces")
