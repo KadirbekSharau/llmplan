@@ -33,8 +33,11 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
   nvidia-smi listings for 81559 (H100), 46068 (L40S), and 23028 (A10G), but none could be
   fetched to confirm, so none is cited as a source.
 - **PR 3 — Dense TFLOPS are half the datasheet "with sparsity" figure** for H100, H200, and
-  L4 (the L4 datasheet states "one-half lower without sparsity"). A100 and L40S datasheets
-  print dense figures directly.
+  L4 (the L4 datasheet states "one-half lower without sparsity"); A100 and L40S datasheets
+  print dense figures directly. The section 7.1 table truncates to whole TFLOPS (989, 362,
+  242 against datasheet-derived 989.5, 362.05, 242.5); the catalog keeps the table values,
+  which the datasheets confirm to that precision, and quotes the datasheet figure beside
+  each. M3_DESIGN.md test 9.1 is written against 989.
 - **PR 3 — AWS prices** were read on 2026-09-30 from the public JSON file that backs
   https://aws.amazon.com/ec2/pricing/on-demand/ (us-east-1, Linux, publication date
   2026-09-25). Values are stored at full published precision (e.g. 21.957642).
@@ -67,13 +70,10 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
 - **PR 3 — `load_prices(path, *, gpus=None)`.** The FK check in section 7.2 needs a GPU
   catalog; a user passing `--gpus` must be able to validate prices against it.
   ARCHITECTURE.md section 5 updated.
-- **PR 3 — Catalog values differ from the section 7.1 table where the datasheet says
-  otherwise:** H100/H200 `fp16_dense_tflops` 989.5 (table: 989; datasheet 1,979 sparse / 2),
-  L40S 362.05 (table: 362; datasheet prints 362.05), L4 `fp8_dense_tflops` 242.5 (table: 242;
-  datasheet 485 sparse / 2). A10G `memory_bandwidth_gbps` and `fp16_dense_tflops` are `null`
-  (table: 600 and 125, which are NVIDIA A10 numbers; NVIDIA publishes no A10G datasheet and
-  the AWS G5 page gives neither). A10G `nvlink: false` carries a TODO(M3) since it is not
-  documented either way.
+- **PR 3 — A10G `memory_bandwidth_gbps` and `fp16_dense_tflops` are `null`** (section 7.1
+  table: 600 and 125). Those are NVIDIA A10 datasheet numbers; NVIDIA publishes no A10G
+  datasheet and the AWS G5 page gives neither, so they cannot be verified for the A10G.
+  `nvlink: false` (a required bool) carries a TODO(M3) since it is not documented either way.
 - **PR 3 — `pytest-cov` added as a dev dependency** (DEFINITION_OF_DONE.md section 3
   requires 90% coverage). Not in section 11's list.
 
