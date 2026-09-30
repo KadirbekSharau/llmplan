@@ -11,6 +11,7 @@ from llmplan.catalog import architectures
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.catalog.models import ModelSpec
 from llmplan.memory.dtypes import QUANTIZED_INT
+from llmplan.memory.fit import FitResult
 from llmplan.perf.config import ReplicaConfig, fit_for
 from llmplan.perf.estimate import PerfEstimate, StatsLike, register
 from llmplan.types import DType
@@ -81,6 +82,17 @@ def prefill_tokens_per_s(tflops: float, tensor_parallel: int, params: int) -> fl
     return tflops * 1e12 * PREFILL_MFU * tensor_parallel / (2 * params)
 
 
+def fit_or_reason(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig) -> FitResult | str:
+    """M1 `fit()` for the replica, or a one-line reason when the model does not fit."""
+    fit = fit_for(model, gpu, config)
+    if fit.fits:
+        return fit
+    return (
+        f"{model.id} does not fit on {gpu.id} at tensor_parallel {config.tensor_parallel} "
+        f"with max_model_len {config.max_model_len} (binding: {fit.binding})"
+    )
+
+
 def _notes(config: ReplicaConfig, batch: int, kv_seqs: int, ctx: float) -> list[str]:
     notes = [
         CONSTANTS_NOTE,
@@ -97,12 +109,9 @@ def _notes(config: ReplicaConfig, batch: int, kv_seqs: int, ctx: float) -> list[
 def _evaluate(
     model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike
 ) -> PerfEstimate | str:
-    fit = fit_for(model, gpu, config)
-    if not fit.fits:
-        return (
-            f"{model.id} does not fit on {gpu.id} at tensor_parallel {config.tensor_parallel} "
-            f"with max_model_len {config.max_model_len} (binding: {fit.binding})"
-        )
+    fit = fit_or_reason(model, gpu, config)
+    if isinstance(fit, str):
+        return fit
     bandwidth = gpu.memory_bandwidth_gbps
     tflops = dense_tflops(gpu, config.dtype)
     if bandwidth is None:

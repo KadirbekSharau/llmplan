@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from llmplan.errors import BenchmarkError, PerfError
 from llmplan.perf import PerfEstimate, ReplicaConfig, StatsLike, estimate
 from llmplan.perf.benchmarks import BenchmarkRow, load_benchmarks, physical_floor_s
 from llmplan.perf.roofline import RooflineBackend
+from llmplan.perf.table import TableBackend
 
 
 class WorkloadStats(BaseModel):
@@ -71,6 +73,7 @@ STATS = WorkloadStats(
 )
 
 LLAMA70 = load_model("fixture:llama3-70b")
+LLAMA8 = load_model("fixture:llama3-8b")
 H100 = load_gpus()["h100-sxm-80gb"]
 
 
@@ -118,6 +121,11 @@ def test_9_3_roofline_requires_bandwidth() -> None:
     assert RooflineBackend().estimate(LLAMA70, gpu, _config(4), STATS) is None
     with pytest.raises(PerfError, match="memory_bandwidth_gbps null"):
         estimate(LLAMA70, gpu, _config(4), STATS, backend="roofline")
+    with pytest.raises(PerfError) as info:
+        estimate(LLAMA70, gpu, _config(4), STATS, backend="auto")
+    message = str(info.value)
+    assert "table: no benchmark rows" in message
+    assert "roofline: gpu h100-no-bandwidth has memory_bandwidth_gbps null" in message
 
 
 def _row(**overrides: Any) -> dict[str, Any]:
@@ -167,3 +175,62 @@ def test_9_6_shipped_rows_are_valid_and_sourced() -> None:
     for row in table.rows:
         assert row.source_url.startswith("https://")
         assert row.as_of is not None
+
+
+# 9.5 Table interpolation
+def test_9_5_table_interpolation(tmp_path: Path) -> None:
+    rows = [
+        _row(
+            model_id="fixture:llama3-8b",
+            tensor_parallel=1,
+            concurrency=8,
+            output_tokens_per_s=1000.0,
+        ),
+        _row(
+            model_id="fixture:llama3-8b",
+            tensor_parallel=1,
+            concurrency=64,
+            output_tokens_per_s=6000.0,
+        ),
+    ]
+    backend = TableBackend(load_benchmarks(_write_table(tmp_path, rows)))
+    backends = {"table": backend}
+
+    est = backend.estimate(LLAMA8, H100, _config(1, max_num_seqs=32), STATS)
+    assert est is not None
+    assert est.backend == "table"
+    assert est.confidence == "interpolated"
+    assert est.effective_batch == 32
+    assert 1000.0 < est.decode_tokens_per_s < 6000.0
+    weight = math.log(32 / 8) / math.log(64 / 8)
+    assert est.decode_tokens_per_s == pytest.approx(1000.0 + weight * 5000.0, rel=1e-6)
+    assert est.source_urls == ("https://example.com/test-only",)
+
+    measured = backend.estimate(LLAMA8, H100, _config(1, max_num_seqs=64), STATS)
+    assert measured is not None
+    assert measured.confidence == "measured"
+    assert measured.decode_tokens_per_s == 6000.0
+
+    long_inputs = STATS.model_copy(update={"input_tokens_mean": 8192.0})
+    assert backend.estimate(LLAMA8, H100, _config(1, max_num_seqs=32), long_inputs) is None
+    fallback = estimate(LLAMA8, H100, _config(1, max_num_seqs=32), long_inputs, backends=backends)
+    assert fallback.backend == "roofline"
+    assert fallback.confidence == "roofline"
+
+
+# 9.7 Determinism
+def test_9_7_identical_inputs_give_identical_json(tmp_path: Path) -> None:
+    for backend in ("auto", "roofline"):
+        first = estimate(LLAMA70, H100, _config(4), STATS, backend=backend)
+        second = estimate(LLAMA70, H100, _config(4), STATS, backend=backend)
+        assert first.model_dump_json() == second.model_dump_json()
+    rows = [
+        _row(model_id="fixture:llama3-8b", tensor_parallel=1, concurrency=c, output_tokens_per_s=t)
+        for c, t in ((8, 1000.0), (64, 6000.0))
+    ]
+    backends = {"table": TableBackend(load_benchmarks(_write_table(tmp_path, rows)))}
+    config = _config(1, max_num_seqs=32)
+    first = estimate(LLAMA8, H100, config, STATS, backends=backends)
+    second = estimate(LLAMA8, H100, config, STATS, backends=backends)
+    assert first.backend == "table"
+    assert first.model_dump_json() == second.model_dump_json()
