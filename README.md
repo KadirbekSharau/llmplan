@@ -13,3 +13,15 @@ Status: pre-implementation. Documents drive the work:
 - [docs/CTO_ASSESSMENT.md](docs/CTO_ASSESSMENT.md) — background reasoning (optional reading)
 
 Implementing agents: start with PLAN.md, then ARCHITECTURE.md, then your milestone's design doc.
+
+## Development
+
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+
+```
+uv sync --locked
+uv run ruff check && uv run ruff format --check
+uv run mypy --strict llmplan
+uv run pytest
+uv audit
+```

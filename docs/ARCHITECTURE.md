@@ -287,12 +287,13 @@ class CatalogError(LLMPlanError): ...          # missing GPU id, bad YAML row
 class UnsupportedArchitecture(CatalogError):   # carries `field` that could not be derived
 class FetchError(CatalogError): ...            # HF fetch failed / disallowed id
 class ValidationError(LLMPlanError): ...       # wraps pydantic errors at boundaries
+class UnknownRegistryKey(LLMPlanError): ...    # registry get() with an unregistered key (section 6)
 class InfeasiblePlan(LLMPlanError): ...        # M4: no fleet satisfies constraints; carries reason
 class SolverError(LLMPlanError): ...           # M4: backend failure / time limit without incumbent
 ```
 
-CLI maps these to exit codes 2 (usage/validation), 3 (catalog/fetch), 4 (infeasible),
-5 (solver). Messages are one line, actionable, and name the offending field or id.
+CLI maps these to exit codes 2 (usage/validation, unknown registry key), 3 (catalog/fetch),
+4 (infeasible), 5 (solver). Messages are one line, actionable, and name the offending field or id.
 
 ---
 
