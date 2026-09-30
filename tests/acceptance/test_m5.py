@@ -8,13 +8,25 @@ hand-checkable. Defaults: prefill 1000 tokens/s, tpot 10 ms, one slot, one repli
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
+from llmplan.catalog.hardware import load_gpus, load_prices
+from llmplan.catalog.models import load_model
+from llmplan.memory.engine import EngineProfile
+from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
+from llmplan.planner.result import PlanResult
 from llmplan.render.plots import save_png
 from llmplan.simulate import SimOptions, replay, replay_requests
+from llmplan.workload import Distribution, compute_stats, generate, load_workload
 from tests.fake_planner import sim_plan, workload
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+# Token lengths spanning workload_10.csv (inputs 100..1000, outputs 10..100).
+INPUTS = Distribution(kind="uniform", lo=100, hi=1000)
+OUTPUTS = Distribution(kind="uniform", lo=10, hi=100)
 
 BUDGET_200 = SimOptions(ttft_budget_ms=200.0)
 
@@ -101,3 +113,77 @@ def test_9_9_plot(tmp_path: Path) -> None:
     path = tmp_path / "timeline.png"
     save_png(timeline, path)
     assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def plan_10_9() -> tuple[PlanResult, float]:
+    """The M4 acceptance plan 10.9 (llama3-8b, roofline, shipped catalogs) and its
+    workload's peak window rate."""
+    stats = compute_stats(load_workload(FIXTURES / "workload_10.csv"))
+    request = PlanRequest(
+        model=load_model("fixture:llama3-8b"),
+        stats=stats,
+        slo=SLO(),
+        engine=EngineProfile(),
+        options=PlanOptions(max_model_len=8192, perf_backend="roofline"),
+        gpus=load_gpus(),
+        prices=load_prices(),
+    )
+    return plan(request), stats.peak_window_rps
+
+
+def ttft_budget(result: PlanResult) -> SimOptions:
+    """TTFT budget of twice the largest planned replica's service-time TTFT p95."""
+    p95 = max(r.candidate.perf.ttft_ms_p95 for r in result.replicas if r.candidate.perf)
+    return SimOptions(ttft_budget_ms=2 * p95)
+
+
+# 9.6 Real plan, well provisioned: half the plan's peak demand.
+def test_9_6_real_plan_well_provisioned() -> None:
+    result, peak_rps = plan_10_9()
+    trace = generate(
+        rate_rps=peak_rps * 0.5, duration_s=3600, input_tokens=INPUTS, output_tokens=OUTPUTS, seed=0
+    )
+    timeline = replay(result, trace, options=ttft_budget(result))
+    assert timeline.summary.ttft_violation_pct < 5
+    assert timeline.summary.mean_utilization < 0.8
+
+
+# 9.7 Real plan, under-provisioned: one replica at 3x its capacity. The design's "3x the
+# plan's demand" (0.3 req/s) cannot queue on this plan: its single replica serves 29.3 req/s,
+# about 98x that rate. M5_NOTES.md shows the arithmetic.
+def test_9_7_real_plan_under_provisioned() -> None:
+    result, _ = plan_10_9()
+    first = result.replicas[0]
+    one = result.model_copy(update={"replicas": (first.model_copy(update={"count": 1}),)})
+    assert first.candidate.perf is not None
+    capacity_rps = first.candidate.perf.requests_per_s_capacity  # one replica, not derated
+    trace = generate(
+        rate_rps=3 * capacity_rps,
+        duration_s=300,
+        input_tokens=INPUTS,
+        output_tokens=OUTPUTS,
+        seed=0,
+    )
+    timeline = replay(one, trace, options=ttft_budget(result))
+    assert timeline.summary.ttft_violation_pct > 50
+    assert timeline.summary.max_queue_depth > 10
+
+
+# 9.10 Performance: about 200k requests on 4 replicas in under 30 s.
+@pytest.mark.slow
+def test_9_10_performance() -> None:
+    fleet = sim_plan(replicas=4, effective_batch=64, prefill_tokens_per_s=10_000.0, tpot_ms=5.0)
+    trace = generate(
+        rate_rps=252.0,
+        duration_s=800.0,
+        input_tokens=Distribution(kind="lognormal", mean=6.2, sigma=0.8),
+        output_tokens=Distribution(kind="lognormal", mean=4.8, sigma=0.9),
+        seed=0,
+    )
+    assert len(trace.frame) >= 200_000
+    start = time.perf_counter()
+    timeline = replay(fleet, trace)
+    elapsed = time.perf_counter() - start
+    print(f"9.10: replayed {timeline.summary.n_requests:,} requests in {elapsed:.2f} s")
+    assert timeline.summary.n_requests == len(trace.frame)
+    assert elapsed < 30

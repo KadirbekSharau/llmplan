@@ -66,4 +66,5 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra --strict-markers -m 'not slow' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
+markers = ["slow: long-running performance tests; excluded by default, select with -m slow"]
