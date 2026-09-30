@@ -97,6 +97,33 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   the input distribution must have `lo >= 1` (a `Workload` needs `input_tokens >= 1`); each
   raises `ValidationError`. `parse_distribution()` (CLI syntax of section 8) lives in
   `synth.py` so the M6 UI can reuse it.
+- **Step 4 — Manifest values.** All five files were downloaded once on 2026-09-30 and
+  hashed locally; the Azure 2024 and BurstGPT hashes equal the SHA-256 digests GitHub
+  publishes for those release assets. Azure 2023 files live in the repository tree, not in a
+  release, so their URLs are pinned to commit `790921015d50dd6aae7f7e47f39ba0e235ad6b08`
+  (the last commit touching them) and were re-hashed at that commit. BurstGPT uses the
+  release v2.0 asset (52,283,111 bytes), not the copy in the repo's `data/` directory, which
+  has a different size (50,853,373 bytes). No entry needed `url: null`. Licenses: both
+  datasets are CC-BY-4.0 (GitHub license API). No manifest value is null.
+- **Step 4 — Fetch behavior.** Consent is checked in the library (`fetch_trace(..., yes=)`)
+  before the manifest is read or any request is built, so the CLI stays a thin adapter and
+  exits 2 via `ValidationError`. The temporary `.part` file is created inside `--dest` so the
+  final rename is atomic, and it is removed in a `finally` on every failure path. The stream
+  stops as soon as it passes the smaller of 2 GiB and the manifest `size_bytes` (a longer
+  body cannot match). Every hop, including redirects (GitHub release downloads redirect to
+  a CDN host), must be https; hosts are not allow-listed because the SHA-256 check is the
+  integrity guarantee. An existing target file is reused if its checksum matches and refused
+  otherwise, never overwritten. `--dest` must already exist. Unknown names raise
+  `ValidationError` (exit 2) listing the known names.
+- **Step 4 — `data/traces/.gitignore`** ignores everything but the manifest, so a fetch with
+  `--dest data/traces` cannot be committed by accident.
+- **Step 4 — CLI module.** `llmplan/cli_workload.py` holds the M2 sub-apps (as agreed for the
+  parallel M3 branch); `llmplan/cli.py` gains one import line and one `add_typer` line per
+  sub-app. `cli_workload` reaches `llmplan.cli._run` through a function-level import,
+  because `llmplan.cli` imports `cli_workload` at module level.
+- **Step 4 — Not verified against the live endpoints with the fetch command itself**
+  (network use was limited to one download per file); the HTTP path is covered with
+  `httpx.MockTransport`, and the pinned URLs were checked when hashing.
 
 ## Deviations from the design doc
 

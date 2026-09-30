@@ -149,12 +149,14 @@ llmplan/
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
+  cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
   prices.yaml
   benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
+  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (data files never committed)
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -430,6 +432,10 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
   whole load fails with `BenchmarkError` naming the file, row index, and model id.
 - Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
+- `data/traces/manifest.yaml` (M2): list of `TraceSource` rows
+  (`llmplan.workload.fetch`: `name`, `url | None`, `sha256 | None`, `size_bytes | None`,
+  `as_of`, `license_url`). `llmplan traces fetch` downloads only with `--yes`, caps at
+  2 GiB, verifies the SHA-256, and never writes into the repo unless `--dest` points there.
 
 ---
 

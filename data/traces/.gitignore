@@ -1,0 +1,4 @@
+# Only the manifest is tracked; downloaded traces must never be committed.
+*
+!.gitignore
+!manifest.yaml

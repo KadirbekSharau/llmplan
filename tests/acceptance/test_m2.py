@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import httpx
 import numpy as np
 import pandas as pd
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from typer.testing import CliRunner
 
-from llmplan.errors import ValidationError, WorkloadFormatError
+from llmplan.cli import app
+from llmplan.errors import FetchError, ValidationError, WorkloadFormatError
 from llmplan.workload import Distribution, Workload, compute_stats, generate, load_workload
+from llmplan.workload.fetch import fetch_trace, load_manifest
 from llmplan.workload.formats import detect
 from llmplan.workload.formats.generic_csv import write_csv
 
@@ -137,6 +142,26 @@ def test_9_4_zero_diurnal_hours_give_zero_hourly_rps() -> None:
     hourly = compute_stats(_synth(duration_s=86_400, diurnal=diurnal)).hourly_rps
     assert hourly is not None
     assert {h for h, rps in enumerate(hourly) if rps == 0.0} == zero_hours
+
+
+# 9.5 Fetch safety
+def test_9_5_fetch_without_yes_exits_2_and_sends_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[Any] = []
+    monkeypatch.setattr(httpx.Client, "send", lambda self, *a, **k: sent.append(a))
+    result = CliRunner().invoke(app, ["traces", "fetch", "azure2023-code", "--dest", str(tmp_path)])
+    assert result.exit_code == 2
+    assert sent == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_9_5_checksum_mismatch_raises_and_leaves_no_file(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"not the trace"))
+    with pytest.raises(FetchError, match="SHA-256"):
+        fetch_trace("azure2023-code", tmp_path, yes=True, transport=transport)
+    assert list(tmp_path.iterdir()) == []
+    assert load_manifest()["azure2023-code"].sha256 is not None
 
 
 # 9.6 Property tests
