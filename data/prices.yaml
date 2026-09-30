@@ -1,0 +1,88 @@
+# Price catalog (schema: llmplan.catalog.hardware.PriceRow). price_usd_per_hour is for the
+# whole instance. Prices are not used by M1 logic; M4 consumes them.
+#
+# AWS rows: on-demand Linux, us-east-1, read on 2026-09-30 from the data file behind the
+# on-demand pricing page (file publication date 2026-09-25).
+
+- provider: aws
+  instance: p5.48xlarge
+  gpu_id: h100-sxm-80gb
+  gpu_count: 8
+  price_usd_per_hour: 55.04
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+- provider: aws
+  instance: p4d.24xlarge
+  gpu_id: a100-sxm-40gb
+  gpu_count: 8
+  price_usd_per_hour: 21.957642
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+- provider: aws
+  instance: p4de.24xlarge
+  gpu_id: a100-sxm-80gb
+  gpu_count: 8
+  price_usd_per_hour: 27.44705
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+- provider: aws
+  instance: g6e.xlarge
+  gpu_id: l40s-48gb
+  gpu_count: 1
+  price_usd_per_hour: 1.861
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+- provider: aws
+  instance: g6.xlarge
+  gpu_id: l4-24gb
+  gpu_count: 1
+  price_usd_per_hour: 0.8048
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+- provider: aws
+  instance: g5.xlarge
+  gpu_id: a10g-24gb
+  gpu_count: 1
+  price_usd_per_hour: 1.006
+  commitment: on_demand
+  region: us-east-1
+  source_url: https://aws.amazon.com/ec2/pricing/on-demand/
+  as_of: 2026-09-30
+
+# Pricing page lists "NVIDIA H100 SXM, 1x" at $4.29 per GPU-hour (plus applicable tax).
+# The page does not print the API instance name; gpu_1x_h100_sxm5 is from M1_DESIGN.md.
+- provider: lambda
+  instance: gpu_1x_h100_sxm5
+  gpu_id: h100-sxm-80gb
+  gpu_count: 1
+  price_usd_per_hour: 4.29
+  commitment: on_demand
+  region: null
+  source_url: https://lambda.ai/pricing
+  as_of: 2026-09-30
+
+# Secure Cloud on-demand pod rate (Community Cloud is cheaper and not listed here).
+- provider: runpod
+  instance: h100-sxm
+  gpu_id: h100-sxm-80gb
+  gpu_count: 1
+  price_usd_per_hour: 3.49
+  commitment: on_demand
+  region: null
+  source_url: https://www.runpod.io/pricing
+  as_of: 2026-09-30

@@ -1,0 +1,88 @@
+# GPU catalog (schema: llmplan.catalog.hardware.GPUSpec).
+#
+# vram_bytes is the nvidia-smi reported total (MiB x 1,048,576), not the marketing number.
+# nvidia-smi totals are not published on NVIDIA datasheets; the MiB values below come from
+# M1_DESIGN.md section 7.1. h100-sxm-80gb and a10g-24gb are pinned by acceptance tests.
+#
+# TFLOPS are dense (no sparsity). NVIDIA datasheets quote Tensor Core figures "with
+# sparsity" for Hopper and Ada; dense is exactly one half of the sparse figure (the L4
+# datasheet states this explicitly). A100 and L40S datasheets list dense figures directly.
+
+- id: h100-sxm-80gb
+  vendor: nvidia
+  name: NVIDIA H100 SXM 80GB
+  vram_bytes: 85520809984  # 81559 MiB (datasheet: 80GB)
+  memory_bandwidth_gbps: 3350  # datasheet: 3.35TB/s
+  fp16_dense_tflops: 989.5  # datasheet: 1,979 with sparsity
+  fp8_dense_tflops: 1979  # datasheet: 3,958 with sparsity
+  nvlink: true  # datasheet: NVLink 900GB/s
+  source_url: https://www.nvidia.com/en-us/data-center/h100/
+  as_of: 2026-09-30
+
+- id: h200-sxm-141gb
+  vendor: nvidia
+  name: NVIDIA H200 SXM 141GB
+  vram_bytes: 150754820096  # 143771 MiB (datasheet: 141GB). TODO(M3): verify nvidia-smi total
+  memory_bandwidth_gbps: 4800  # datasheet: 4.8TB/s
+  fp16_dense_tflops: 989.5  # datasheet: 1,979 with sparsity
+  fp8_dense_tflops: 1979  # datasheet: 3,958 with sparsity
+  nvlink: true  # datasheet: NVLink 900GB/s
+  source_url: https://www.nvidia.com/en-us/data-center/h200/
+  as_of: 2026-09-30
+
+- id: a100-sxm-80gb
+  vendor: nvidia
+  name: NVIDIA A100 SXM 80GB
+  vram_bytes: 85899345920  # 81920 MiB (datasheet: 80GB HBM2e). TODO(M3): verify nvidia-smi total
+  memory_bandwidth_gbps: 2039  # datasheet: 2,039GB/s
+  fp16_dense_tflops: 312  # datasheet: 312 dense | 624 with sparsity
+  fp8_dense_tflops: null  # Ampere has no FP8 Tensor Cores
+  nvlink: true  # datasheet: NVLink 600GB/s
+  source_url: https://www.nvidia.com/en-us/data-center/a100/
+  as_of: 2026-09-30
+
+- id: a100-sxm-40gb
+  vendor: nvidia
+  name: NVIDIA A100 SXM 40GB
+  vram_bytes: 42949672960  # 40960 MiB (datasheet: 40GB HBM2). TODO(M3): verify nvidia-smi total
+  memory_bandwidth_gbps: 1555  # datasheet: 1,555GB/s (40GB SXM column)
+  fp16_dense_tflops: 312  # datasheet: 312 dense | 624 with sparsity
+  fp8_dense_tflops: null  # Ampere has no FP8 Tensor Cores
+  nvlink: true  # datasheet: NVLink 600GB/s
+  source_url: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
+  as_of: 2026-09-30
+
+- id: l40s-48gb
+  vendor: nvidia
+  name: NVIDIA L40S 48GB
+  vram_bytes: 48305799168  # 46068 MiB (datasheet: 48GB GDDR6). TODO(M3): verify nvidia-smi total
+  memory_bandwidth_gbps: 864  # datasheet: 864GB/s
+  fp16_dense_tflops: 362.05  # datasheet: 362.05 dense | 733 with sparsity
+  fp8_dense_tflops: 733  # datasheet: 733 dense | 1,466 with sparsity
+  nvlink: false  # datasheet: NVLink support No
+  source_url: https://www.nvidia.com/en-us/data-center/l40s/
+  as_of: 2026-09-30
+
+- id: l4-24gb
+  vendor: nvidia
+  name: NVIDIA L4 24GB
+  vram_bytes: 24152899584  # 23034 MiB (datasheet: 24GB). TODO(M3): verify nvidia-smi total
+  memory_bandwidth_gbps: 300  # datasheet: 300GB/s
+  fp16_dense_tflops: 121  # datasheet: 242 with sparsity, "one-half lower without sparsity"
+  fp8_dense_tflops: 242.5  # datasheet: 485 with sparsity
+  nvlink: false  # datasheet: PCIe Gen4 x16 only
+  source_url: https://www.nvidia.com/en-us/data-center/l4/
+  as_of: 2026-09-30
+
+# The A10G is an AWS-specific part; NVIDIA publishes no A10G datasheet and the AWS G5 page
+# gives only memory size and an INT8 TOPS figure. A10 (non-G) datasheet numbers do not apply.
+- id: a10g-24gb
+  vendor: nvidia
+  name: NVIDIA A10G 24GB
+  vram_bytes: 24146608128  # 23028 MiB (AWS: 24 GB per GPU)
+  memory_bandwidth_gbps: null  # TODO(M3): verify (no NVIDIA A10G datasheet)
+  fp16_dense_tflops: null  # TODO(M3): verify (no NVIDIA A10G datasheet)
+  fp8_dense_tflops: null  # Ampere has no FP8 Tensor Cores
+  nvlink: false  # TODO(M3): verify; g5 instances are not documented with NVLink
+  source_url: https://aws.amazon.com/ec2/instance-types/g5/
+  as_of: 2026-09-30

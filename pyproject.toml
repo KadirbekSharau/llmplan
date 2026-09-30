@@ -19,6 +19,7 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-PyYAML>=6.0",
+    "pytest-cov>=5.0",
 ]
 
 [build-system]
@@ -54,4 +55,4 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --cov=llmplan --cov-report=term-missing --cov-fail-under=90"

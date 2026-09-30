@@ -258,7 +258,7 @@ Downstream code calls only these.
 |---|---|---|
 | M1 | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
 | M1 | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
-| M1 | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec] / tuple[PriceRow, ...]` |
+| M1 | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
 | M2 | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None) -> Workload` |
 | M3 | `llmplan.perf.estimate` | `(model, gpu, tp, config, workload_stats, *, backend="table") -> PerfEstimate` |
 | M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
