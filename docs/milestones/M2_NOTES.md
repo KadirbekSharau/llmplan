@@ -134,6 +134,18 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   is byte-identical across runs.
 - **Step 5 — `docs/MILESTONES.md` status is left to the CTO**, as in M1: the done status needs
   the merge commit hash, which only exists after review.
+- **Rebased onto `main` after M3 merged (PR #1).** Conflicts were only in shared lists:
+  `llmplan/cli.py` (both sub-app imports and `add_typer` lines kept), README (M2 commands
+  placed before M3's, M3's exit-code line kept), CHANGELOG (M2 entry before M3's), and
+  ARCHITECTURE.md sections 3 to 6 (both milestones' rows kept). Every rebased commit was
+  re-checked (ruff, format, mypy, pytest).
+- **M2 -> M3 hand-off.** M3 reads workload statistics through its `StatsLike` protocol
+  (`input_tokens_{mean,p50,p95}`, `output_tokens_{mean,p50,p95}`); `WorkloadStats` has
+  those fields with the same names and types, and `test_workload_perf_compat.py` checks the
+  protocol and runs `llmplan.perf.estimate` on stats computed from a fixture. Not done here:
+  `llmplan perf estimate --trace PATH` still exits 2 with M3's `TODO(M2)` in
+  `llmplan/cli_perf.py`, because that file is outside this branch's scope. Wiring it is two
+  lines (`compute_stats(load_workload(trace))`) for the CTO or M4.
 - **Package growth.** M2 adds about 1,140 lines under `llmplan/` (largest module
   `formats/reader.py`, 171 lines; none near 300). The design asks for four formats, a
   validated schema, statistics, a generator, a checksum-verified downloader, and three CLI
@@ -177,9 +189,10 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   the trace manifest.
 - **Step 5 — Workload stats renderers live in `llmplan/cli_workload.py`, not in the
   `llmplan.render` registry.** ARCHITECTURE.md section 6 says later milestones add a method
-  per result type to the `Renderer` protocol. M3 is extending `render/` on a parallel
-  branch and this branch was scoped to stay out of it, so `stats_text` and `stats_json` are
-  two plain functions next to the command, marked `TODO(M4)` to move into `render/`.
+  per result type to the `Renderer` protocol. M3 was extending `render/` on a parallel
+  branch and this branch was scoped to stay out of `render/`, so `stats_text` and
+  `stats_json` are two plain functions next to the command, marked `TODO(M4)` to move into
+  `render/` (two methods on `Renderer`, same output).
 
 ## Questions for founder
 
