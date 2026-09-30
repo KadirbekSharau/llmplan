@@ -48,7 +48,21 @@ The three question shapes we must answer, in priority order:
 3. **Cheapest.** "Across GPU types and providers, what mix minimizes $/day for that traffic
    and SLO?" (Milestone 4, with the timeline proof in Milestone 5)
 
-## 4. Goals
+## 4. Deliverables and interfaces
+
+Three layers, built in this order. Each is a thin adapter over the one below it.
+
+| Layer | What it is | Who uses it | Milestones |
+|---|---|---|---|
+| Library `llmplan` | pip-installable Python package; every capability is a pure function returning a frozen model | the CLI, the UI, future API, partner integrations, tests | M1 to M5 |
+| CLI `llmplan` | one subcommand per capability (`fit`, `workload`, `perf`, `plan`, `simulate`); text tables, JSON, PNG plots | engineers scripting sizing; CTO verification of each milestone; forum power users | each milestone ships its command |
+| Web UI | Streamlit single-page app: model picker, trace preset/upload/synthetic, SLO inputs, editable price catalog, results with vLLM command lines and the utilization timeline | the public launch audience (vLLM forum, r/LocalLLaMA, Hacker News); free, hosted, no login | M6 |
+
+The web UI is the launch deliverable. The CLI and library exist so the UI contains no logic
+and so every milestone is verifiable end to end without a UI. A hosted HTTP API is a likely
+follow-on and is one more adapter, not a rewrite.
+
+## 5. Goals
 
 - G1: Exact, testable VRAM arithmetic from a model's Hugging Face config.json. No estimates
   where an exact formula exists.
@@ -59,7 +73,7 @@ The three question shapes we must answer, in priority order:
 - G5: A public, free web UI within roughly six weeks of implementation effort, launched on
   the forums where the questions are asked.
 
-## 5. Non-goals (do not build these, even if asked nicely by a test or a comment)
+## 6. Non-goals (do not build these, even if asked nicely by a test or a comment)
 
 - Anything that connects to a Kubernetes cluster, a GPU, or a live inference server.
 - Online request routing or scheduling.
@@ -68,7 +82,7 @@ The three question shapes we must answer, in priority order:
 - Non-NVIDIA accelerators in v1 (the catalog is extensible; do not spend time on it).
 - MIG partitioning as an optimization variable in v1.
 
-## 6. Principles for implementing agents
+## 7. Principles for implementing agents
 
 1. **Exact before empirical.** VRAM is arithmetic; throughput is empirical. Keep them in
    separate modules with separate confidence labels.
@@ -84,7 +98,7 @@ The three question shapes we must answer, in priority order:
 7. **Do not widen scope.** If a milestone needs something from a later milestone, stub it
    behind the documented interface and leave a TODO referencing the milestone number.
 
-## 7. Success metrics
+## 8. Success metrics
 
 - M1 to M5: acceptance tests in each design doc pass; the Mélange reproduction is within
   10% of the paper's reported cost for the conversational scenario.
@@ -93,7 +107,7 @@ The three question shapes we must answer, in priority order:
 - Longer term: users asking for "connect my Prometheus" is the signal to revisit the
   deferred runtime products.
 
-## 8. Risks and mitigations
+## 9. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -102,7 +116,7 @@ The three question shapes we must answer, in priority order:
 | Price catalogs go stale | `as_of` on every row; UI shows the date; catalog is editable |
 | Scope creep toward runtime systems | Non-goals list above; CTO review at each milestone boundary |
 
-## 9. Tooling and repo conventions
+## 10. Tooling and repo conventions
 
 - Python 3.11+, `uv` for environments, `pyproject.toml` with `hatchling` build.
 - `ruff` (lint + format), `pytest`, `mypy --strict` on `llmplan/` (allow `# type: ignore`
