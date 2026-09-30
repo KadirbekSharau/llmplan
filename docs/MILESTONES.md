@@ -10,7 +10,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M1 | in progress | main |
 | M2 | designed | m2-workload |
 | M3 | designed | m3-perf |
-| M4 | not designed | |
+| M4 | designed | m4-planner |
 | M5 | not designed | |
 | M6 | not designed | |
 
