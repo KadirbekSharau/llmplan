@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import BaseModel, ConfigDict
 
 from llmplan.catalog.hardware import GPUSpec, load_gpus
 from llmplan.catalog.models import load_model
@@ -17,37 +16,7 @@ from llmplan.perf import PerfEstimate, ReplicaConfig, StatsLike, estimate
 from llmplan.perf.benchmarks import BenchmarkRow, load_benchmarks, physical_floor_s
 from llmplan.perf.roofline import RooflineBackend
 from llmplan.perf.table import TableBackend
-
-
-class WorkloadStats(BaseModel):
-    """Field-for-field copy of M2's `WorkloadStats` (M2_DESIGN.md section 3).
-
-    TODO(M2): import `WorkloadStats` from `llmplan.workload` once M2 is merged.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    n_requests: int
-    duration_s: float
-    window_s: float
-    n_windows: int
-    mean_rps: float
-    peak_window_rps: float
-    peak_window_index: int
-    input_tokens_p50: float
-    input_tokens_p95: float
-    input_tokens_p99: float
-    input_tokens_mean: float
-    input_tokens_max: int
-    output_tokens_p50: float
-    output_tokens_p95: float
-    output_tokens_p99: float
-    output_tokens_mean: float
-    output_tokens_max: int
-    peak_input_tokens_per_s: float
-    peak_output_tokens_per_s: float
-    hourly_rps: tuple[float, ...] | None
-
+from llmplan.workload.schema import WorkloadStats
 
 STATS = WorkloadStats(
     n_requests=1000,
