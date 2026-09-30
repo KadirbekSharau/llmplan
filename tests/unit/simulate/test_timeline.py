@@ -25,6 +25,12 @@ def test_step_windows_carries_state_into_a_window() -> None:
     assert maximum.tolist() == [3.0, 3.0]
 
 
+def test_step_windows_of_an_idle_replica() -> None:
+    integral, maximum = _step_windows(np.array([]), np.array([]), np.array([0.0, 1.0, 2.0]))
+    assert integral.tolist() == [0.0, 0.0]
+    assert maximum.tolist() == [0.0, 0.0]
+
+
 def test_windows_extend_to_the_last_completion() -> None:
     # Two requests at 0 and 1 s, service 0.5 s, one slot, 1 s windows: the second completes
     # at 1.5 s, inside window 1; nothing arrives or completes later.

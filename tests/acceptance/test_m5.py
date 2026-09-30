@@ -8,8 +8,11 @@ hand-checkable. Defaults: prefill 1000 tokens/s, tpot 10 ms, one slot, one repli
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from llmplan.render.plots import save_png
 from llmplan.simulate import SimOptions, replay, replay_requests
 from tests.fake_planner import sim_plan, workload
 
@@ -90,3 +93,11 @@ def test_9_8_truncation() -> None:
     assert timeline.summary.n_truncated == 50
     assert timeline.summary.n_requests == 50
     assert any("truncated" in note for note in timeline.assumptions)
+
+
+# 9.9 Plot: a PNG written headless (Agg canvas, no display).
+def test_9_9_plot(tmp_path: Path) -> None:
+    timeline = replay(sim_plan(replicas=2), workload([0.25 * i for i in range(100)], 100, 40))
+    path = tmp_path / "timeline.png"
+    save_png(timeline, path)
+    assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

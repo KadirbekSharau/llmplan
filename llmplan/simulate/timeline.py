@@ -250,8 +250,9 @@ def _step_windows(
     takes `value[i]` from `time_s[i]` on. Window `k` is `[bounds[k], bounds[k + 1])`; states
     that last zero time (several events at one instant) still count toward the maximum."""
     n = len(bounds) - 1
-    last = np.searchsorted(time_s, bounds, side="right") - 1
-    at_bounds = np.where(last >= 0, value[np.maximum(last, 0)], 0.0)
+    time_s = np.concatenate([bounds[:1], time_s])  # explicit idle state at the origin
+    value = np.concatenate([[0.0], value])
+    at_bounds = value[np.searchsorted(time_s, bounds, side="right") - 1]
     times = np.concatenate([time_s, bounds])
     values = np.concatenate([value, at_bounds])
     order = np.argsort(times, kind="stable")  # at equal times, bounds follow the events
