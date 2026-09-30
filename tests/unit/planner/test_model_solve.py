@@ -171,8 +171,10 @@ def test_solver_runtime_error_and_bad_relaxation(
         raise RuntimeError("INTERNAL: boom")
 
     monkeypatch.setattr(solve_module.mathopt, "solve", broken)
-    with pytest.raises(SolverError, match="highs failed: INTERNAL: boom"):
+    with pytest.raises(SolverError, match=r"highs failed: INTERNAL: boom .*fresh process"):
         solve(_build(cols), "highs", time_limit_s=1, seed=0)
+    with pytest.raises(SolverError, match=r"cp_sat failed: INTERNAL: boom$"):
+        solve(_build(cols, integer_scaling=True), "cp_sat", time_limit_s=1, seed=0)
     monkeypatch.setattr(
         solve_module.mathopt,
         "solve",

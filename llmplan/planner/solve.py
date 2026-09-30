@@ -30,6 +30,10 @@ OPTIONAL = frozenset({"scip", "gurobi"})  # used only when MathOpt can load them
 INTEGER_ONLY = frozenset({"cp_sat"})  # backends that need the integer-scaled model
 TIGHT_TOLERANCE = 1e-6  # relative slack below which a demand constraint counts as tight
 LP_TIME_LIMIT_S = 10.0
+HIGHS_THREADS_HINT = (
+    " (HiGHS fixes its thread count per process; if other code already ran HiGHS here with "
+    "more threads, run llmplan in a fresh process or use --solver cp_sat)"
+)
 
 
 @dataclass(frozen=True)
@@ -130,7 +134,8 @@ def solve(formulation: Formulation, backend: str, *, time_limit_s: float, seed: 
             formulation.model, SOLVERS[backend], params=parameters(backend, time_limit_s, seed)
         )
     except RuntimeError as exc:
-        raise SolverError(f"{backend} failed: {exc}") from None
+        hint = HIGHS_THREADS_HINT if backend == "highs" else ""
+        raise SolverError(f"{backend} failed: {exc}{hint}") from None
     status = _status(result, backend)
     bound = result.termination.objective_bounds.dual_bound
     model = formulation.model
