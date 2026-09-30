@@ -5,8 +5,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from llmplan import render
 from llmplan.cli import app
-from llmplan.cli_workload import stats_text
 from llmplan.workload import Distribution, compute_stats, generate
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
@@ -61,7 +61,7 @@ def test_stats_text_shows_hourly_profile_and_notes() -> None:
     workload = generate(
         rate_rps=0.5, duration_s=86_400, input_tokens=fixed, output_tokens=fixed, seed=3
     )
-    lines = stats_text(workload, compute_stats(workload)).splitlines()
+    lines = render.get("text").workload_stats(workload, compute_stats(workload)).splitlines()
     assert lines[10].startswith("hourly req/s    00-05h  0.")
     assert lines[13].startswith("                18-23h  0.")
     assert lines[14].startswith("note            synthetic Poisson arrivals")

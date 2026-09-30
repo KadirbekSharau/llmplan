@@ -14,8 +14,11 @@ from llmplan.memory.weights import model_info
 from llmplan.perf.benchmarks import BenchmarkRow
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import INPUT_STAT_FIELDS, OUTPUT_STAT_FIELDS, PerfEstimate, StatsLike
+from llmplan.planner.request import PlanRequest
+from llmplan.planner.result import PlanResult
 from llmplan.render import register
 from llmplan.types import KVDType
+from llmplan.workload import Workload, WorkloadStats
 
 REQUEST_FIELDS = {"tensor_parallel", "dtype", "quantize_embeddings", "context_len"}
 
@@ -53,6 +56,17 @@ class JsonRenderer:
     def gpus(self, gpus: Mapping[str, GPUSpec]) -> str:
         return _dumps([gpu.model_dump(mode="json") for gpu in gpus.values()])
 
+    def workload_stats(self, workload: Workload, stats: WorkloadStats) -> str:
+        return _dumps(
+            {
+                "source": workload.source,
+                "format": workload.format,
+                "dropped_rows": workload.dropped_rows,
+                "notes": list(workload.notes),
+                "stats": stats.model_dump(mode="json"),
+            }
+        )
+
     def perf_estimate(
         self,
         model: ModelSpec,
@@ -75,3 +89,17 @@ class JsonRenderer:
 
     def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str:
         return _dumps([row.model_dump(mode="json") for row in rows])
+
+    def plan(self, request: PlanRequest, result: PlanResult) -> str:
+        return _dumps(
+            {
+                **result.model_dump(mode="json"),
+                "request": {
+                    "model": request.model.id,
+                    "slo": request.slo.model_dump(mode="json"),
+                    "engine": request.engine.model_dump(mode="json"),
+                    "options": request.options.model_dump(mode="json"),
+                    "stats": request.stats.model_dump(mode="json"),
+                },
+            }
+        )

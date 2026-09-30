@@ -4,8 +4,8 @@ CPU-only planner for self-hosted LLM inference: given a model, traffic, a latenc
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
 
-Status: M1 implemented (model catalog, GPU/price catalogs, exact VRAM fit, CLI). Documents
-drive the work:
+Status: M1 to M4 implemented (model and GPU/price catalogs with exact VRAM fit, workload
+ingestion, performance model, MILP fleet planner). Documents drive the work:
 
 - [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
@@ -93,9 +93,10 @@ uv run llmplan perf estimate --model fixture:llama3-70b --gpu h100-sxm-80gb --tp
 ```
 
 Options: `--dtype`, `--max-num-seqs 256`, `--max-model-len 8192`,
-`--backend {auto,roofline,table}`, `--format {text,json}`. All six token statistics are
-required. `--trace PATH` is reserved for M2 (workload ingestion) and currently exits 2.
-Latencies are service times without queueing.
+`--backend {auto,roofline,table}`, `--format {text,json}`. Pass either all six token
+statistics or `--trace PATH`, which computes them from a trace as `llmplan workload stats`
+does (`uv run llmplan perf estimate --model fixture:llama3-8b --gpu l40s-48gb --trace
+tests/fixtures/workload_10.csv`). Latencies are service times without queueing.
 
 **`llmplan perf benchmarks`** — the shipped benchmark rows, optionally filtered by GPU and
 model (fixture ids match through `data/benchmarks/aliases.yaml`).
@@ -104,8 +105,30 @@ model (fixture ids match through `data/benchmarks/aliases.yaml`).
 uv run llmplan perf benchmarks --gpu h100-sxm-80gb --model fixture:llama3-8b
 ```
 
+**`llmplan plan`** — the cheapest fleet (instances of which price rows) and replica
+configurations (tensor parallelism, dtype, `max_num_seqs`) that meet the workload's peak
+request and output-token rates within the latency SLO. It solves a mixed-integer program
+(OR-Tools MathOpt, HiGHS by default), compares the answer with the best single-GPU-type
+fleet, says which demand constraint was binding, lists every candidate with the reason it
+was used or rejected, and prints a `vllm serve` command per replica.
+
+```
+uv run llmplan plan --model fixture:llama3-8b --trace tests/fixtures/workload_10.csv --max-model-len 8192
+```
+
+Options: `--stats-json PATH` instead of `--trace` (the output of `workload stats
+--format-out json`, or a bare stats object), `--ttft-p95-ms`, `--tpot-p95-ms` (service-time
+bounds; queueing is not modeled), `--utilization 0.8` (capacity derating), `--gpus
+h100-sxm-80gb,l40s-48gb`, `--providers aws,lambda`, `--tp 1,2,4,8`, `--dtypes bf16,fp8`,
+`--max-num-seqs 32,64,128,256`, `--homogeneous`, `--perf-backend {auto,roofline,table}`,
+`--solver {highs,cp_sat,scip,gurobi}` (SCIP and Gurobi only when OR-Tools can load them),
+`--time-limit 60`, `--gpu-catalog PATH`, `--prices PATH`, `--format {text,json,vllm}`.
+Solves are single-threaded and seeded, so the JSON output is byte-identical across runs.
+The fleet is sized for the peak window only (no autoscaling yet).
+
 Exit codes: 0 success, 1 no performance estimate possible (`perf estimate`), 2
-usage/validation, 3 catalog/fetch error (including invalid benchmark rows). Shipped fixtures:
+usage/validation, 3 catalog/fetch error (including invalid benchmark rows), 4 no feasible
+plan, 5 solver error. Shipped fixtures:
 `fixture:llama3-70b`, `fixture:llama3-8b`, `fixture:mistral-7b-v0.1`, `fixture:qwen2.5-7b`.
 
 ## Development
