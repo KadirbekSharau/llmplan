@@ -175,12 +175,15 @@ class ModelSpec(BaseModel, frozen=True):
     tie_word_embeddings: bool
     attention_bias: bool        # qwen2 has q/k/v bias
     mlp_bias: bool
+    qk_norm: bool = False       # Qwen3: per-layer q_norm/k_norm of size head_dim (M1)
     max_position_embeddings: int
     sliding_window: int | None  # informational in M1
     param_count_override: int | None   # user-supplied when architecture unsupported
-    source: str                 # "huggingface", "fixture", "manual"
+    source: Literal["huggingface", "fixture", "manual"]
+    # strict=True: config values must already be ints/bools. Property `attention` derives
+    # mha/gqa/mqa. Validator: num_attention_heads % num_kv_heads == 0.
 
-class DerivedModelInfo(BaseModel, frozen=True):   # computed, cached per ModelSpec
+class DerivedModelInfo(BaseModel, frozen=True):   # computed by memory.weights.model_info
     param_count: int
     attention: Attention
     weight_bytes_by_dtype: dict[DType, int]
@@ -271,7 +274,7 @@ no entry points, until an external contributor needs one.
 
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
-| Architectures | `catalog/architectures` | `count_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int` | `llama_like` |
+| Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
 | Trace formats | `workload/formats` | `parse(path) -> Workload` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf` | `PerfBackend` protocol | `table` (M3), `vidur` (optional) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
