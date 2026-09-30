@@ -1,0 +1,12 @@
+# Model-id aliases for benchmark matching (schema: llmplan.perf.benchmarks).
+#
+# key: an id a user may pass (a fixture, or a renamed repo); value: the canonical id that
+# benchmark rows are recorded under. A fixture key also supplies the architecture used for
+# the load-time physical-bound check of rows recorded under its canonical id.
+#
+# The llama3 fixtures carry Llama 3 integers (max_position_embeddings 8192). Llama 3.1 has
+# the same layer, head, hidden, intermediate, and vocabulary sizes, hence the same parameter
+# count, weight bytes, and KV bytes per token; only the RoPE scaling and maximum context
+# differ, which the performance model does not read.
+fixture:llama3-70b: meta-llama/Llama-3.1-70B-Instruct
+fixture:llama3-8b: meta-llama/Llama-3.1-8B-Instruct

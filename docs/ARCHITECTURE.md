@@ -127,6 +127,7 @@ llmplan/
     config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
     estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
     roofline.py          # roofline backend (first-principles bounds)
+    benchmarks.py        # BenchmarkRow/BenchmarkTable, YAML loader, physical-bound check
     table.py             # benchmark-table interpolation backend
     vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
@@ -147,7 +148,7 @@ llmplan/
 data/
   gpus.yaml
   prices.yaml
-  benchmarks/            # M3
+  benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
 tests/
   unit/<package>/
@@ -290,6 +291,29 @@ class ReplicaConfig(BaseModel, frozen=True):
     max_model_len: int                  # <= model.max_position_embeddings (checked by estimate)
     gpu_memory_utilization: float = 0.9 # 0 < x <= 1
     max_num_batched_tokens: int = 8192  # gt=0
+
+# llmplan/perf/benchmarks.py (M3)
+class BenchmarkRow(BaseModel, frozen=True):
+    model_id: str                       # canonical id (see aliases.yaml) or fixture id
+    gpu_id: str                         # FK -> GPUSpec.id; must equal the file stem
+    engine: Literal["vllm", "trtllm", "sglang", "nim"]   # nim: container, engine unnamed
+    engine_version: str
+    tensor_parallel: int
+    dtype: DType
+    concurrency: int                    # concurrent requests during the measurement
+    input_len: int                      # tokens
+    output_len: int
+    output_tokens_per_s: float          # aggregate output throughput
+    ttft_ms_p50: float | None
+    ttft_ms_p95: float | None
+    tpot_ms_p50: float | None
+    tpot_ms_p95: float | None
+    source_url: str
+    as_of: date
+
+class BenchmarkTable(BaseModel, frozen=True):
+    rows: tuple[BenchmarkRow, ...]
+    aliases: dict[str, str]             # model id -> canonical id; canonical(id) method
 ```
 
 Later milestones add `Workload`, `SLO`, `PlanRequest`, `PlanResult`, `Timeline` following
@@ -309,6 +333,7 @@ Downstream code calls only these.
 | M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
 | M2 | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None) -> Workload` |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
+| M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
 | M5 | `llmplan.simulate.replay` | `(PlanResult, Workload) -> Timeline` |
 
@@ -356,6 +381,10 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
 - `data/gpus.yaml`: list of `GPUSpec`. `data/prices.yaml`: list of `PriceRow`. Both validated
   on load; a bad row fails the whole load with the row index and field.
 - Users may pass `--gpus`/`--prices` to override with their own files (same schema).
+- `data/benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `data/benchmarks/aliases.yaml`:
+  mapping of model id -> canonical id. Every row must resolve to a model fixture (directly or
+  through an alias) and pass the physical floor (roofline at 100% bandwidth and MFU), or the
+  whole load fails with `BenchmarkError` naming the file, row index, and model id.
 - Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
 

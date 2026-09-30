@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
+import yaml
 from pydantic import BaseModel, ConfigDict
 
 from llmplan.catalog.hardware import GPUSpec, load_gpus
 from llmplan.catalog.models import load_model
-from llmplan.errors import PerfError
+from llmplan.errors import BenchmarkError, PerfError
 from llmplan.perf import PerfEstimate, ReplicaConfig, StatsLike, estimate
+from llmplan.perf.benchmarks import BenchmarkRow, load_benchmarks, physical_floor_s
 from llmplan.perf.roofline import RooflineBackend
 
 
@@ -113,3 +118,52 @@ def test_9_3_roofline_requires_bandwidth() -> None:
     assert RooflineBackend().estimate(LLAMA70, gpu, _config(4), STATS) is None
     with pytest.raises(PerfError, match="memory_bandwidth_gbps null"):
         estimate(LLAMA70, gpu, _config(4), STATS, backend="roofline")
+
+
+def _row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "model_id": "fixture:llama3-70b",
+        "gpu_id": "h100-sxm-80gb",
+        "engine": "vllm",
+        "engine_version": "0.0.0-test",
+        "tensor_parallel": 4,
+        "dtype": "bf16",
+        "concurrency": 8,
+        "input_len": 512,
+        "output_len": 256,
+        "output_tokens_per_s": 100.0,
+        "ttft_ms_p50": None,
+        "ttft_ms_p95": None,
+        "tpot_ms_p50": None,
+        "tpot_ms_p95": None,
+        "source_url": "https://example.com/test-only",
+        "as_of": "2026-09-30",
+    }
+    return {**row, **overrides}
+
+
+def _write_table(directory: Path, rows: list[dict[str, Any]]) -> Path:
+    (directory / "h100-sxm-80gb.yaml").write_text(yaml.safe_dump(rows), encoding="utf-8")
+    return directory
+
+
+# 9.4 Table validation: a row 10x faster than the physical floor is rejected
+def test_9_4_row_above_physical_bound_rejected(tmp_path: Path) -> None:
+    floor_s = physical_floor_s(BenchmarkRow.model_validate(_row()), LLAMA70, H100)
+    assert floor_s is not None
+    too_fast = 10 * 8 / floor_s  # 10x the highest physically possible output tokens/s
+    with pytest.raises(BenchmarkError) as info:
+        load_benchmarks(_write_table(tmp_path, [_row(output_tokens_per_s=too_fast)]))
+    assert "row index 0" in str(info.value)
+    assert "fixture:llama3-70b" in str(info.value)
+    # The same row at a physically possible rate loads.
+    ok = load_benchmarks(_write_table(tmp_path, [_row(output_tokens_per_s=0.5 * 8 / floor_s)]))
+    assert len(ok.rows) == 1
+
+
+# 9.6 Seed data sanity
+def test_9_6_shipped_rows_are_valid_and_sourced() -> None:
+    table = load_benchmarks()  # raises BenchmarkError if any row fails the physical bound
+    for row in table.rows:
+        assert row.source_url.startswith("https://")
+        assert row.as_of is not None
