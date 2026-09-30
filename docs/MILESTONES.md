@@ -7,9 +7,9 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | Milestone | Status | Branch / merge |
 |---|---|---|
 | M0 | done | main (0824153) |
-| M1 | in progress | main |
-| M2 | designed | m2-workload |
-| M3 | designed | m3-perf |
+| M1 | done | main (21c6875) |
+| M2 | in progress | m2-workload |
+| M3 | in progress | m3-perf |
 | M4 | designed | m4-planner |
 | M5 | designed | m5-simulate |
 | M6 | designed | m6-ui |
