@@ -72,6 +72,6 @@ def detect(path: Path) -> str:
     )
 
 
-from llmplan.workload.formats import generic_csv  # noqa: E402
+from llmplan.workload.formats import azure, burstgpt, generic_csv  # noqa: E402
 
-__all__ = ["TraceFormat", "detect", "generic_csv", "get", "keys", "register"]
+__all__ = ["TraceFormat", "azure", "burstgpt", "detect", "generic_csv", "get", "keys", "register"]

@@ -41,6 +41,39 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the impleme
   argument of the parsers; ARCHITECTURE.md section 1 caps UI uploads at 200 MB, so M6 needs
   to pass its own value. A file above the cap, a missing file, or a directory raises
   `ValidationError` (exit 2).
+- **Step 2 — Headers verified on 2026-09-30** by reading the dataset READMEs and the first
+  bytes of each file. Azure 2023 (`AzureLLMInferenceTrace_code.csv`, `_conv.csv`) and Azure
+  2024 (`AzureLLMInferenceTrace_code_1week.csv`, `_conv_1week.csv`) both have exactly
+  `TIMESTAMP,ContextTokens,GeneratedTokens`. 2023 timestamps look like
+  `2023-11-16 18:17:03.9799600` (naive, 7 fractional digits); 2024 timestamps look like
+  `2024-05-10 00:00:00.009930+00:00` (UTC offset, 6 digits). BurstGPT release v2.0
+  `BurstGPT_1.csv` has `Timestamp,Model,Request tokens,Response tokens,Total tokens,Log Type`
+  with integer-second timestamps; the README says newer files add `Session ID` and
+  `Elapsed time`, which the parser ignores (only its four used columns are read, and
+  detection requires the six listed columns).
+- **Step 2 — Telling azure2023 from azure2024.** The headers are identical, so `detect()`
+  also reads the first data row: a `TIMESTAMP` ending in a UTC offset (`+00:00`, `Z`,
+  `-0700`) is `azure2024`, anything else `azure2023`. A header-only Azure file is reported
+  as ambiguous. Both keys share one parser; naive timestamps are read as UTC.
+- **Step 2 — Detection requires exactly one match**; a header that satisfies two formats
+  (e.g. BurstGPT columns plus generic CSV columns) raises `WorkloadFormatError` listing both.
+  Column names are matched exactly (only a UTF-8 BOM is stripped).
+- **Step 2 — BurstGPT failed rows.** In the real `BurstGPT_1.csv` (1,429,737 rows), 25,443
+  rows have `Response tokens == 0` and 25,427 of those also have `Request tokens == 0`.
+  Section 4.4 drops `input_tokens < 1`, so those 25,427 are dropped (1.8%, below the 5% note
+  threshold) and 16 zero-output rows are kept and reported in the `zero_output_rows` note.
+  `Workload` requires `input_tokens >= 1`, so keeping them would need an invented value;
+  a zero-token failed request also costs no prefill or decode work.
+- **Step 2 — `Log Type` is not mapped to `tenant`**; the design maps only `Model`.
+- **Step 2 — Fixtures** (`tests/fixtures/workload_{csv,azure2023,azure2024,burstgpt}_50.csv`)
+  were generated with a seeded script using invented values in each verified layout; no row
+  is copied from a dataset.
+- **Step 2 — Real-trace check (not part of the test suite, no data committed).** Parsing the
+  downloaded files: Azure 2023 code 8,819 rows and conversation 19,366 rows (under 0.1 s
+  each, 0 dropped); BurstGPT_1 1,404,310 rows kept in 1.1 s; Azure 2024 code one-week
+  16,803,695 rows in 38 s with 1.6 GB peak RSS, duration 604,799.9 s, `hourly_rps` over 7
+  full days. Nearly all of the 2024 time is pandas' ISO-8601 parsing (about 2 s per million
+  rows); M6's 60-second preset budget should account for it.
 
 ## Deviations from the design doc
 
