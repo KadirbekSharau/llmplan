@@ -118,8 +118,6 @@ Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a la
   same-inputs cross-check against Mélange's solver.
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
 - **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
-- **Stale marker.** `tests/acceptance/test_m3.py` still carries a `TODO(M2)` for importing
-  the real `WorkloadStats`; M5 should replace the local copy with the M2 model.
 
 ## Dependencies
 
