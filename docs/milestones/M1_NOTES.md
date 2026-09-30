@@ -26,7 +26,7 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
 - **PR 2 — `data/fixtures/model_configs/gpt2.json`** is the unsupported-architecture fixture
   for test 9.6.
 - **PR 2 — Data files are located relative to the repo** (`<repo>/data`). The built wheel
-  does not contain `data/`; see Questions.
+  does not contain `data/`; see the last section.
 - **PR 3 — nvidia-smi totals are not on NVIDIA datasheets.** `vram_bytes` is a required int,
   so the MiB values from section 7.1 are kept; h100 and a10g are pinned by acceptance tests;
   the other five carry `TODO(M3): verify nvidia-smi total`. Web search surfaced third-party
@@ -131,9 +131,14 @@ Structure per docs/DEFINITION_OF_DONE.md section 6. Each entry names the commit 
 
 ## Questions for founder
 
-- RunPod Community Cloud H100 SXM is $2.69/hr versus $3.49 Secure Cloud. `PriceRow` has no
-  field for the cloud tier; should Community Cloud be a separate `instance` row?
-- Should `data/` ship inside the wheel so `pip install llmplan` works outside a checkout?
-  Today the CLI finds catalogs relative to the repo. Proposed for M6 (web deploy).
-- Is an nvidia-smi listing on a public page (forum post, cluster docs) an acceptable
-  `source_url` for `vram_bytes`, given datasheets only give marketing GB?
+None. Per the founder's rule in docs/FOUNDER_QUESTIONS.md (log only what the CTO cannot
+decide), these CTO-decidable items were decided here and are open to CTO review:
+
+- **RunPod Community Cloud** ($2.69/hr vs $3.49 Secure Cloud) is not catalogued; only the
+  Secure Cloud row the design asks for. If wanted, add it as a separate `instance` row
+  (e.g. `h100-sxm-community`); `PriceRow` needs no new field.
+- **`data/` is not packaged in the wheel.** The CLI reads catalogs relative to the checkout.
+  Packaging belongs with the M6 deploy (PLAN.md section 4 wants a pip-installable library).
+- **`vram_bytes` sources.** The design-doc MiB values are kept, with TODO(M3) where no
+  fetchable nvidia-smi listing confirmed them. A public nvidia-smi listing would be an
+  acceptable citation when M3 revisits the catalog.
