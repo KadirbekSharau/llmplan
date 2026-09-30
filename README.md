@@ -4,8 +4,9 @@ CPU-only planner for self-hosted LLM inference: given a model, traffic, a latenc
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
 
-Status: M1 to M4 implemented (model and GPU/price catalogs with exact VRAM fit, workload
-ingestion, performance model, MILP fleet planner). Documents drive the work:
+Status: M1 to M5 implemented (model and GPU/price catalogs with exact VRAM fit, workload
+ingestion, performance model, MILP fleet planner, trace replay with a utilization
+timeline). Documents drive the work:
 
 - [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
@@ -126,6 +127,25 @@ h100-sxm-80gb,l40s-48gb`, `--providers aws,lambda`, `--tp 1,2,4,8`, `--dtypes bf
 Solves are single-threaded and seeded, so the JSON output is byte-identical across runs.
 The fleet is sized for the peak window only (no autoscaling yet).
 
+**`llmplan simulate`** — replay a trace on a planned fleet and show what it does over time:
+per-window demand against capacity, utilization, KV cache in use and queue depth per
+replica, latency p95s, and SLO violations. `--plan` takes the output of `llmplan plan
+--format json`; each replica gets `effective_batch` slots, the fit's KV-token capacity and
+the perf estimate's service times, and a request waits in its replica's FIFO queue until a
+slot and enough KV tokens are free. TTFT here includes queueing.
+
+```
+uv run llmplan plan --model fixture:llama3-8b --trace tests/fixtures/workload_10.csv --max-model-len 8192 --ttft-p95-ms 500 --format json > plan.json
+uv run llmplan simulate --plan plan.json --trace tests/fixtures/workload_csv_50.csv --png timeline.png
+```
+
+Options: `--window 60` (seconds), `--routing {least_outstanding,round_robin}`,
+`--ttft-p95-ms`, `--tpot-p95-ms` (budgets; default: the SLO recorded in the plan file, and
+without either no violations are counted), `--png PATH` (four-panel figure, rendered
+headless), `--format {text,json}`. The plan can also be piped:
+`uv run llmplan plan ... --format json | uv run llmplan simulate --plan /dev/stdin --trace
+TRACE`. The JSON output is byte-identical across runs.
+
 Exit codes: 0 success, 1 no performance estimate possible (`perf estimate`), 2
 usage/validation, 3 catalog/fetch error (including invalid benchmark rows), 4 no feasible
 plan, 5 solver error. Shipped fixtures:
@@ -140,6 +160,7 @@ uv sync --locked
 uv run ruff check . && uv run ruff format --check .
 uv run mypy --strict llmplan
 uv run pytest            # includes coverage (fails under 90%)
+uv run pytest -m slow --no-cov   # performance test (200k-request replay), excluded by default
 uv audit
 uv build
 ```
