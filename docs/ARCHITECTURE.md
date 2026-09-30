@@ -126,6 +126,7 @@ llmplan/
   perf/                  # M3
     config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
     estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
+    roofline.py          # roofline backend (first-principles bounds)
     table.py             # benchmark-table interpolation backend
     vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
