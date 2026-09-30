@@ -9,8 +9,12 @@ builds the M5 test plans: exact service times and, optionally, a small KV cache.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+
+import numpy as np
+import pandas as pd
 
 from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec, load_model
@@ -19,7 +23,7 @@ from llmplan.perf import PerfEstimate, ReplicaConfig, StatsLike, register
 from llmplan.planner import plan
 from llmplan.planner.request import SLO, PlanOptions, PlanRequest
 from llmplan.planner.result import PlanResult
-from llmplan.workload import WorkloadStats
+from llmplan.workload import Workload, WorkloadStats
 
 AS_OF = date(2026, 9, 30)
 SOURCE = "https://example.com/test-only"
@@ -204,4 +208,23 @@ def sim_plan(
             "cost_usd_per_day": result.cost_usd_per_day * replicas,
             "capacity_rps": result.capacity_rps * replicas,
         }
+    )
+
+
+def workload(arrivals: Sequence[float], input_tokens: int, output_tokens: int) -> Workload:
+    """A trace of identical requests at the given arrival times (first must be 0.0)."""
+    n = len(arrivals)
+    return Workload(
+        source="test",
+        format="synthetic",
+        frame=pd.DataFrame(
+            {
+                "arrival_s": np.asarray(arrivals, dtype=np.float64),
+                "input_tokens": np.full(n, input_tokens, dtype=np.int64),
+                "output_tokens": np.full(n, output_tokens, dtype=np.int64),
+                "model": pd.Series(pd.NA, index=pd.RangeIndex(n), dtype="string"),
+                "tenant": pd.Series(pd.NA, index=pd.RangeIndex(n), dtype="string"),
+            }
+        ),
+        dropped_rows=0,
     )
