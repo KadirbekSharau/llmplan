@@ -1,9 +1,18 @@
 # MILESTONES.md — LLM Capacity Planner
 
 Each milestone is independently assignable to a developer agent. A milestone is done when
-its acceptance tests pass, CI is green, and the CTO review checklist at the bottom is
-satisfied. Design docs live in `docs/milestones/M<N>_DESIGN.md`; only M1 exists today and
-the others are written when the previous milestone merges.
+its acceptance tests pass, CI is green, and every rule in docs/DEFINITION_OF_DONE.md is
+satisfied (the CTO review checklist at the bottom is a summary of those rules). Design docs live in `docs/milestones/M<N>_DESIGN.md`. Status is tracked in the table below.
+
+| Milestone | Status | Branch / merge |
+|---|---|---|
+| M0 | done | main (0824153) |
+| M1 | in progress | main |
+| M2 | designed | m2-workload |
+| M3 | designed | m3-perf |
+| M4 | not designed | |
+| M5 | not designed | |
+| M6 | not designed | |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
 
