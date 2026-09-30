@@ -17,6 +17,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.errors import CatalogError
+from llmplan.types import Commitment
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DEFAULT_GPUS_PATH = DATA_DIR / "gpus.yaml"
@@ -55,7 +56,7 @@ class PriceRow(BaseModel):
     gpu_id: str = Field(pattern=_ID)
     gpu_count: int = Field(gt=0)
     price_usd_per_hour: float = Field(gt=0)
-    commitment: Literal["on_demand", "reserved_1y", "reserved_3y", "spot"]
+    commitment: Commitment
     region: str | None
     source_url: str = Field(pattern=_URL)
     as_of: date
