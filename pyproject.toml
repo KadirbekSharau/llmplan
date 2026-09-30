@@ -11,6 +11,7 @@ dependencies = [
     "typer>=0.12",
     "pandas>=3.0",
     "numpy>=2.0",
+    "ortools>=9.15",
 ]
 
 [project.scripts]
@@ -52,6 +53,10 @@ ignore = [
 strict = true
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["ortools", "ortools.*"]
+ignore_missing_imports = true  # ortools.math_opt ships no py.typed marker or stubs
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
