@@ -25,6 +25,10 @@ def _budget(budget_ms: float | None, violation_pct: float) -> str:
     return f"budget {budget_ms:g} ms: {violation_pct:.2f}% violations"
 
 
+def _replicas(n: int) -> str:
+    return f"{n} replica" if n == 1 else f"{n} replicas"
+
+
 def _row(w: WindowRecord) -> str:
     util = sum(r.utilization for r in w.replicas) / len(w.replicas)
     queue = max(r.queue_depth_max for r in w.replicas)
@@ -52,7 +56,7 @@ def timeline_text(timeline: Timeline) -> str:
         _line("E2E", f"p95 {s.e2e_ms_p95:,.1f} ms"),
         _line(
             "Fleet",
-            f"{len(timeline.windows[0].replicas)} replicas, mean utilization "
+            f"{_replicas(len(timeline.windows[0].replicas))}, mean utilization "
             f"{s.mean_utilization * 100:.1f}%, max queue depth {s.max_queue_depth:,}",
         ),
         _line("Cost", f"${timeline.plan_cost_usd_per_day:,.2f}/day"),

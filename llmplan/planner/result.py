@@ -7,19 +7,25 @@ it was used or rejected.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Sequence
-from typing import Literal, get_args
+from pathlib import Path
+from typing import Any, Literal, get_args
 
+import pydantic
 from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.catalog.hardware import PriceRow
+from llmplan.errors import ValidationError
 from llmplan.memory.fit import FitResult
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate
+from llmplan.planner.request import SLO
 
 Status = Literal["eligible", "no_fit", "slo_ttft", "slo_tpot", "no_perf", "tp_gt_gpus"]
 Binding = Literal["requests", "tokens", "both", "none"]
+MAX_PLAN_JSON_BYTES = 50_000_000
 
 
 class CandidateEval(BaseModel):
@@ -143,3 +149,46 @@ def label(candidate: CandidateEval) -> str:
         f"{row.provider} {row.instance} tp{config.tensor_parallel} {config.dtype} "
         f"seqs{config.max_num_seqs}"
     )
+
+
+def load_plan_json(
+    path: Path, *, max_bytes: int = MAX_PLAN_JSON_BYTES
+) -> tuple[PlanResult, SLO | None]:
+    """Read the output of `llmplan plan --format json` (or a bare `PlanResult` JSON dump).
+
+    Returns the `PlanResult` and the `SLO` recorded under `request.slo`, None when the file
+    has no `request` object. `solver.solve_time_s` is not serialized, so a loaded plan
+    reports 0.0 (also for its baseline). Raises `ValidationError` naming the file for an
+    unreadable, oversized (`max_bytes`, default 50 MB), non-JSON, or non-`PlanResult` file.
+    """
+    try:
+        if path.stat().st_size > max_bytes:
+            raise ValidationError(f"plan file {path} is larger than {max_bytes} bytes")
+        doc: Any = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValidationError(f"plan file {path} is not readable: {exc.strerror}") from None
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValidationError(f"plan file {path} is not valid JSON: {exc}") from None
+    if not isinstance(doc, dict):
+        raise ValidationError(f"plan file {path} does not hold a JSON object")
+    request = doc.pop("request", None)
+    recorded = request.get("slo") if isinstance(request, dict) else None
+    try:
+        result = PlanResult.model_validate(_with_solve_time(doc))
+        slo = None if recorded is None else SLO.model_validate(recorded)
+    except pydantic.ValidationError as exc:
+        err = exc.errors()[0]
+        field = ".".join(str(p) for p in err["loc"]) or "input"
+        raise ValidationError(
+            f"plan file {path} is not a plan result: {field}: {err['msg']}"
+        ) from None
+    return result, slo
+
+
+def _with_solve_time(doc: dict[str, Any]) -> dict[str, Any]:
+    out = dict(doc)
+    if isinstance(out.get("solver"), dict):
+        out["solver"] = {"solve_time_s": 0.0, **out["solver"]}
+    if isinstance(out.get("baseline"), dict):
+        out["baseline"] = _with_solve_time(out["baseline"])
+    return out
