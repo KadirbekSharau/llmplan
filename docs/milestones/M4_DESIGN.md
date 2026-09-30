@@ -242,7 +242,7 @@ replica tp1: 4 rps, tp2: 9 rps, tp4: 20 rps. Demand 40 rps. Best packing on one 
 `max_model_len 8192`: solves in under 30 s, every replica's `fit.fits` is True, cost > 0,
 and the result renders a vLLM command containing `--tensor-parallel-size`.
 
-**10.10 Mélange reproduction (network at implementation time; recorded, not asserted in CI).**
+**10.10 Mélange reproduction — SUPERSEDED (CTO, 2026-10-01).** The public melange-release repository contains only a toy input, and a comparison is not meaningful until request-size demand classes exist. Replaced by M7_DESIGN.md section 6 (brute-force exactness test plus a same-inputs cross-check). Original text kept for the record:
 Using the public `melange-release` repository's GPU set, prices, and the conversational
 workload profile, run the planner with the table backend seeded from Mélange's own
 profiling numbers. Record the achieved cost and Mélange's reported cost in `M4_NOTES.md`.
