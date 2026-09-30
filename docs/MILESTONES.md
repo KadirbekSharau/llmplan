@@ -8,9 +8,9 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 |---|---|---|
 | M0 | done | main (0824153) |
 | M1 | done | main (21c6875) |
-| M2 | in progress | m2-workload |
+| M2 | done | m2-workload, PR #2 (4c6621b) |
 | M3 | done | m3-perf, PR #1 (6675804) |
-| M4 | designed | m4-planner |
+| M4 | in progress | m4-planner |
 | M5 | designed | m5-simulate |
 | M6 | designed | m6-ui |
 

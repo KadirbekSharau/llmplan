@@ -251,6 +251,10 @@ Target: within 10%. If the data cannot be obtained, say so in the notes; do not 
 **10.11 Determinism and renderer.** JSON output byte-identical across two runs; `vllm_cmd`
 for a `dtype="fp8"` replica contains `--quantization fp8`.
 
+## 10b. Carry-over items from M2/M3 (in scope for M4)
+- Wire `llmplan perf estimate --trace PATH` to `load_workload` + `compute_stats` (M3 left a `TODO(M2)`).
+- Move the workload stats text/JSON output from `llmplan/cli_workload.py` into the `render` package (M2 left a `TODO(M4)`), keeping output byte-identical.
+
 ## 11. Implementation order
 1. Models, candidates, dominance pruning, fake backend fixture.
 2. Formulation + HiGHS solve + 10.1, 10.2, 10.3, 10.4.

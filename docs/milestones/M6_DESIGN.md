@@ -69,6 +69,10 @@ generic message and are logged with a request id.
 
 ## 5. Bundled trace samples
 
+Measured in M2: parsing the full Azure 2024 one-week conversation trace takes about 70 s and
+2.4 GB of memory. The UI must never parse a full public trace at request time; only the
+bundled samples below are used as presets.
+
 For each public trace (Azure 2023 conv/code, Azure 2024 conv/code, BurstGPT), commit one
 sample: the busiest 1-hour window (by requests) plus one median-load hour, downsampled if
 needed to at most 20,000 rows, in the generic `csv` format, with a `README.md` in the
