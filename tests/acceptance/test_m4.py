@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from llmplan.planner import plan
+from llmplan.errors import InfeasiblePlan
+from llmplan.planner import SLO, plan
 from llmplan.planner.result import PlanResult
 from tests.conftest import UseFakePerf
 from tests.fake_planner import ROW_A, ROW_B, FakePerf, request
@@ -63,3 +64,44 @@ def test_10_4_token_demand_binds(fake_perf: UseFakePerf) -> None:
     assert _fleet(result) == {"a-1x": 3}
     assert result.binding == "tokens"
     assert result.cost_usd_per_day == 144.0
+
+
+# 10.5 SLO rejection.
+def test_10_5_slo_rejection(fake_perf: UseFakePerf) -> None:
+    fake_perf(
+        {
+            ("fake-a", 1): FakePerf(rps=3, ttft_ms_p95=100),
+            ("fake-b", 1): FakePerf(rps=4, ttft_ms_p95=800),
+        }
+    )
+    result = plan(request(34, slo=SLO(ttft_ms_p95=500, utilization_target=1.0)))
+    assert _fleet(result) == {"a-1x": 12}
+    (b,) = [c for c in result.candidates if c.price_row.instance == "b-8x"]
+    assert b.status == "slo_ttft"
+    assert "800" in b.reason
+    assert "500" in b.reason
+
+
+# 10.6 Infeasible.
+def test_10_6_infeasible(fake_perf: UseFakePerf) -> None:
+    fake_perf(A_B_CAPACITY)
+    with pytest.raises(InfeasiblePlan) as info:
+        plan(request(34, slo=SLO(ttft_ms_p95=10, utilization_target=1.0)))
+    assert "0 of" in str(info.value)
+    assert "slo_ttft" in str(info.value)
+
+
+# 10.7 GPU packing.
+def test_10_7_gpu_packing(fake_perf: UseFakePerf) -> None:
+    fake_perf(
+        {
+            ("fake-b", 1): FakePerf(rps=4),
+            ("fake-b", 2): FakePerf(rps=9),
+            ("fake-b", 4): FakePerf(rps=20),
+        }
+    )
+    result = plan(request(40, (ROW_B,), tensor_parallel_choices=(1, 2, 4)))
+    assert _fleet(result) == {"b-8x": 1}
+    replicas = {r.candidate.config.tensor_parallel: r.count for r in result.replicas}
+    assert replicas == {4: 2}
+    assert result.cost_usd_per_day == 456.0
