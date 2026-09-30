@@ -105,7 +105,7 @@ There is no shared mutable state and no database in v1.
 llmplan/
   __init__.py            # version only
   errors.py              # exception hierarchy (section 7)
-  types.py               # shared Literal aliases: DType, KVDType, Provider
+  types.py               # shared Literal aliases: DType, KVDType, Attention, Commitment
   catalog/
     models.py            # ModelSpec + loaders (HF fetch behind protocol, fixtures)
     architectures/       # registry: per-architecture parameter/KV formulas
@@ -135,9 +135,13 @@ llmplan/
     table.py             # benchmark-table interpolation backend
     vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
-    model.py             # MathOpt formulation
-    solve.py             # backend selection, time limits, determinism
-    result.py            # PlanResult, explanation of binding constraints
+    __init__.py          # plan() (M4 public API): validate, evaluate, prune, solve, explain
+    request.py           # SLO, PlanOptions, PlanRequest
+    candidates.py        # candidate enumeration and pre-solve checks, Column, dominance pruning
+    model.py             # MathOpt formulation (pure: columns in, model out)
+    solve.py             # backend selection, parameters, determinism, LP relaxation (GLOP)
+    baseline.py          # best homogeneous fleet by enumeration (no solver)
+    result.py            # CandidateEval, ReplicaPlan, FleetItem, SolverInfo, PlanResult
   simulate/              # M5
     replay.py
     timeline.py
@@ -145,11 +149,14 @@ llmplan/
     __init__.py          # Renderer protocol, register(), get()
     text.py              # M1
     json_render.py       # M1 (named to avoid shadowing stdlib json)
-    vllm_cmd.py
+    workload_text.py     # M2 `workload stats` text (moved from cli_workload.py in M4)
+    plan_text.py         # M4 `plan` text
+    vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
   cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
+  cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
@@ -360,9 +367,91 @@ class WorkloadStats(BaseModel, frozen=True):      # compute_stats(workload, wind
     hourly_rps: tuple[float, ...] | None   # 24 entries when >= 24 hour windows, else None
 ```
 
-Later milestones add `SLO`, `PlanRequest`, `PlanResult`, `Timeline` following
-the same conventions. Their fields are specified in their design docs and copied here when
-merged.
+```python
+# llmplan/types.py (M4)
+Commitment = Literal["on_demand", "reserved_1y", "reserved_3y", "spot"]   # PriceRow.commitment
+
+# llmplan/planner/request.py (M4)
+class SLO(BaseModel, frozen=True):
+    ttft_ms_p95: float | None = None          # gt=0; service-time bound (queueing is M5)
+    tpot_ms_p95: float | None = None          # gt=0
+    utilization_target: float = 0.8           # 0 < x <= 1; capacity is derated by this
+
+class PlanOptions(BaseModel, frozen=True):    # choice tuples non-empty, no duplicates
+    gpu_ids: tuple[str, ...] | None = None    # None = every GPU with at least one price row
+    providers: tuple[str, ...] | None = None
+    commitments: tuple[Commitment, ...] = ("on_demand",)
+    tensor_parallel_choices: tuple[int, ...] = (1, 2, 4, 8)
+    dtype_choices: tuple[DType, ...] = ("bf16", "fp8")
+    max_num_seqs_choices: tuple[int, ...] = (32, 64, 128, 256)
+    max_model_len: int                        # required; <= model.max_position_embeddings
+    homogeneous: bool = False                 # force a single price row
+    perf_backend: str = "auto"                # "auto" or a perf registry key
+    solver: Literal["highs", "cp_sat", "scip", "gurobi"] = "highs"
+    time_limit_s: float = 60.0
+    seed: int = 0                             # 0 <= seed <= 2**31 - 1
+    max_instances_per_row: int = 1000         # big-M bound
+
+class PlanRequest(BaseModel, frozen=True):
+    model: ModelSpec
+    stats: WorkloadStats
+    slo: SLO
+    engine: EngineProfile
+    options: PlanOptions
+    gpus: Mapping[str, GPUSpec]               # catalogs passed explicitly (tests inject rows)
+    prices: tuple[PriceRow, ...]
+
+# llmplan/planner/result.py (M4)
+class CandidateEval(BaseModel, frozen=True):
+    price_row: PriceRow
+    config: ReplicaConfig
+    replicas_per_instance: int                # gpu_count // tensor_parallel
+    fit: FitResult | None                     # None if rejected before the memory check
+    perf: PerfEstimate | None
+    status: Literal["eligible", "no_fit", "slo_ttft", "slo_tpot", "no_perf", "tp_gt_gpus"]
+    reason: str
+    usd_per_hour_per_rps: float | None        # price / (replicas_per_instance * derated rps)
+
+class ReplicaPlan(BaseModel, frozen=True):
+    candidate: CandidateEval
+    count: int                                # replicas of this candidate
+    instances: int                            # ceil(count * tp / gpu_count)
+
+class FleetItem(BaseModel, frozen=True):
+    price_row: PriceRow
+    instances: int
+    usd_per_day: float
+
+class SolverInfo(BaseModel, frozen=True):
+    backend: str                              # solver key, or "enumeration" for a baseline
+    status: Literal["optimal", "feasible_time_limit"]
+    objective_usd_per_day: float              # recomputed from the integers with float prices
+    best_bound_usd_per_day: float | None
+    solve_time_s: float                       # wall clock; excluded from serialization
+    n_variables: int
+    n_constraints: int
+
+class PlanResult(BaseModel, frozen=True):
+    fleet: tuple[FleetItem, ...]
+    replicas: tuple[ReplicaPlan, ...]
+    cost_usd_per_day: float
+    baseline: PlanResult | None               # best homogeneous fleet; None if homogeneous
+                                              #   requested or no single row meets demand
+    baseline_saving_pct: float | None
+    demand_rps: float                         # stats.peak_window_rps
+    demand_output_tokens_per_s: float         # stats.peak_output_tokens_per_s
+    capacity_rps: float                       # derated, summed over replicas
+    capacity_output_tokens_per_s: float
+    binding: Literal["requests", "tokens", "both", "none"]   # tight in the LP relaxation over
+                                              #   the chosen candidates (tol 1e-6 relative)
+    candidates: tuple[CandidateEval, ...]     # all; eligible by usd_per_hour_per_rps, then
+                                              #   rejected (empty on a baseline)
+    solver: SolverInfo
+    assumptions: tuple[str, ...]
+```
+
+Later milestones add `Timeline` following the same conventions. Its fields are specified in
+its design doc and copied here when merged.
 
 ---
 
@@ -378,7 +467,7 @@ Downstream code calls only these.
 | M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 200 MB cap) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
-| M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
+| M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
 | M5 | `llmplan.simulate.replay` | `(PlanResult, Workload) -> Timeline` |
 
 ---
@@ -395,7 +484,7 @@ no entry points, until an external contributor needs one.
 | Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(path, *, max_bytes) -> Workload`; `detect(path) -> str` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member |
 
 ---
 
@@ -426,6 +515,8 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
 - `data/gpus.yaml`: list of `GPUSpec`. `data/prices.yaml`: list of `PriceRow`. Both validated
   on load; a bad row fails the whole load with the row index and field.
 - Users may pass `--gpus`/`--prices` to override with their own files (same schema).
+  `llmplan plan` uses `--gpus` for a list of GPU ids (M4_DESIGN.md section 9), so its catalog
+  overrides are `--gpu-catalog PATH` and `--prices PATH`.
 - `data/benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `data/benchmarks/aliases.yaml`:
   mapping of model id -> canonical id. Every row must resolve to a model fixture (directly or
   through an alias) and pass the physical floor (roofline at 100% bandwidth and MFU), or the
