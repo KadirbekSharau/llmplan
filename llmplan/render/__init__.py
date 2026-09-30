@@ -6,7 +6,7 @@ not already expose. Adding a format is a new module plus an import line below.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from llmplan.errors import UnknownRegistryKey
@@ -15,16 +15,30 @@ if TYPE_CHECKING:
     from llmplan.catalog.hardware import GPUSpec
     from llmplan.catalog.models import ModelSpec
     from llmplan.memory.fit import FitRequest, FitResult
+    from llmplan.perf.benchmarks import BenchmarkRow
+    from llmplan.perf.config import ReplicaConfig
+    from llmplan.perf.estimate import PerfEstimate, StatsLike
 
 
 class Renderer(Protocol):
-    """Formats the results of `llmplan fit`, `llmplan model-info`, and `llmplan gpus`."""
+    """Formats the results of each command (`fit`, `model-info`, `gpus`, `perf ...`)."""
 
     def fit(self, request: FitRequest, result: FitResult) -> str: ...
 
     def model_info(self, spec: ModelSpec) -> str: ...
 
     def gpus(self, gpus: Mapping[str, GPUSpec]) -> str: ...
+
+    def perf_estimate(
+        self,
+        model: ModelSpec,
+        gpu: GPUSpec,
+        config: ReplicaConfig,
+        stats: StatsLike,
+        result: PerfEstimate,
+    ) -> str: ...
+
+    def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str: ...
 
 
 _REGISTRY: dict[str, Renderer] = {}

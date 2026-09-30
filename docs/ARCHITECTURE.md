@@ -144,6 +144,7 @@ llmplan/
     vllm_cmd.py
     ...
   cli.py                 # typer app; thin
+  cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
@@ -351,7 +352,7 @@ no entry points, until an external contributor needs one.
 | Trace formats | `workload/formats` | `parse(path) -> Workload` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
 
 ---
 

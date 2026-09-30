@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.catalog.models import ModelSpec
@@ -10,6 +10,9 @@ from llmplan.memory.engine import GIB, activation_bytes
 from llmplan.memory.fit import FitRequest, FitResult
 from llmplan.memory.kv_cache import kv_bytes_per_token_total
 from llmplan.memory.weights import model_info, weight_bytes
+from llmplan.perf.benchmarks import BenchmarkRow
+from llmplan.perf.config import ReplicaConfig
+from llmplan.perf.estimate import PerfEstimate, StatsLike
 from llmplan.render import register
 
 LABEL_WIDTH = 10
@@ -120,3 +123,63 @@ class TextRenderer:
                 f"{'yes' if gpu.nvlink else 'no':>8}  {gpu.as_of.isoformat()}"
             )
         return "\n".join(rows) + "\n"
+
+    def perf_estimate(
+        self,
+        model: ModelSpec,
+        gpu: GPUSpec,
+        config: ReplicaConfig,
+        stats: StatsLike,
+        result: PerfEstimate,
+    ) -> str:
+        r = result
+        lines = [
+            _line(
+                "Replica",
+                f"{model.id} on {gpu.name} x TP={config.tensor_parallel}  ({config.dtype}, "
+                f"KV {config.kv_dtype}, max_num_seqs {config.max_num_seqs}, max_model_len "
+                f"{config.max_model_len:,})",
+            ),
+            _line(
+                "Workload",
+                f"input mean {stats.input_tokens_mean:g} / p50 {stats.input_tokens_p50:g} / p95 "
+                f"{stats.input_tokens_p95:g}   output mean {stats.output_tokens_mean:g} / p50 "
+                f"{stats.output_tokens_p50:g} / p95 {stats.output_tokens_p95:g} tokens",
+            ),
+            _line("Backend", f"{r.backend}  (confidence: {r.confidence})"),
+            _line("Batch", f"{r.effective_batch:,} concurrent sequences"),
+            _line(
+                "Decode",
+                f"{r.decode_tokens_per_s:,.0f} tokens/s   TPOT p50 {r.tpot_ms_p50:.2f} ms, "
+                f"p95 {r.tpot_ms_p95:.2f} ms",
+            ),
+            _line(
+                "Prefill",
+                f"{r.prefill_tokens_per_s:,.0f} tokens/s   TTFT p50 {r.ttft_ms_p50:.2f} ms, "
+                f"p95 {r.ttft_ms_p95:.2f} ms",
+            ),
+            _line("Capacity", f"{r.requests_per_s_capacity:,.2f} requests/s (service time only)"),
+        ]
+        for i, note in enumerate(r.assumptions):
+            lines.append(_line("Notes" if i == 0 else "", f"- {note}"))
+        for i, url in enumerate(r.source_urls):
+            lines.append(_line("Sources" if i == 0 else "", url))
+        return "\n".join(lines) + "\n"
+
+    def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str:
+        header = (
+            f"{'gpu':<15}{'model':<36}{'engine':<13}{'tp':>3}{'dtype':>6}{'in/out':>11}"
+            f"{'conc':>6}{'out tok/s':>11}"
+        )
+        lines = [header]
+        for row in rows:
+            engine = f"{row.engine} {row.engine_version}"
+            shape = f"{row.input_len}/{row.output_len}"
+            lines.append(
+                f"{row.gpu_id:<15}{row.model_id:<36}{engine:<13}{row.tensor_parallel:>3}"
+                f"{row.dtype:>6}{shape:>11}{row.concurrency:>6}{row.output_tokens_per_s:>11,.2f}"
+            )
+        sources = sorted({(row.source_url, row.as_of.isoformat()) for row in rows})
+        lines.append(f"{len(rows)} rows")
+        lines.extend(f"source: {url} (as of {as_of})" for url, as_of in sources)
+        return "\n".join(lines) + "\n"

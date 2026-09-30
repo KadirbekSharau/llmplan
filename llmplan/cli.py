@@ -16,6 +16,7 @@ import typer
 from llmplan import render
 from llmplan.catalog.hardware import load_gpus
 from llmplan.catalog.models import ModelSpec, load_model
+from llmplan.cli_perf import perf_app
 from llmplan.errors import (
     CatalogError,
     InfeasiblePlan,
@@ -129,3 +130,6 @@ def model_info_command(model: ModelOpt, fmt: FormatOpt = "text") -> None:
 def gpus_command(gpus: GpusOpt = None, fmt: FormatOpt = "text") -> None:
     """List the GPU catalog."""
     _run(lambda: render.get(fmt).gpus(load_gpus(gpus)))
+
+
+app.add_typer(perf_app, name="perf")
