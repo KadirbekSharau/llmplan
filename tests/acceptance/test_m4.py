@@ -7,15 +7,24 @@ passes. Defaults: utilization_target 1.0, tp (1,), bf16, max_num_seqs (64), toke
 
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pytest
 
 from llmplan import render
+from llmplan.catalog.hardware import load_gpus, load_prices
+from llmplan.catalog.models import load_model
 from llmplan.errors import InfeasiblePlan
-from llmplan.planner import SLO, plan
+from llmplan.memory.engine import EngineProfile
+from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
 from llmplan.planner.result import PlanResult
 from llmplan.render.vllm_cmd import serve_command
+from llmplan.workload import compute_stats, load_workload
 from tests.conftest import UseFakePerf
 from tests.fake_planner import ROW_A, ROW_B, FakePerf, request
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 A_B_CAPACITY = {("fake-a", 1): FakePerf(rps=3), ("fake-b", 1): FakePerf(rps=4)}
 
@@ -117,6 +126,32 @@ def test_10_8_cp_sat_agrees_with_highs(fake_perf: UseFakePerf) -> None:
     assert cp_sat.solver.backend == "cp_sat"
     assert _fleet(cp_sat) == _fleet(highs) == {"b-8x": 1, "a-1x": 1}
     assert cp_sat.cost_usd_per_day == highs.cost_usd_per_day == 504.0
+
+
+# 10.9 Real catalogs, roofline backend.
+def test_10_9_real_catalogs_roofline() -> None:
+    req = PlanRequest(
+        model=load_model("fixture:llama3-8b"),
+        stats=compute_stats(load_workload(FIXTURES / "workload_10.csv")),
+        slo=SLO(),
+        engine=EngineProfile(),
+        options=PlanOptions(max_model_len=8192, perf_backend="roofline"),
+        gpus=load_gpus(),
+        prices=load_prices(),
+    )
+    start = time.perf_counter()
+    result = plan(req)
+    assert time.perf_counter() - start < 30
+    assert result.replicas
+    for replica in result.replicas:
+        assert replica.candidate.fit is not None
+        assert replica.candidate.fit.fits
+    assert result.cost_usd_per_day > 0
+    config = result.replicas[0].candidate.config
+    assert "--tensor-parallel-size" in serve_command(req.model, config)
+
+
+# 10.10 Mélange reproduction: recorded in docs/milestones/M4_NOTES.md, not asserted in CI.
 
 
 # 10.11 Determinism and renderer.

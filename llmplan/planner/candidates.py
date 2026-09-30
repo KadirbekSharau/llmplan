@@ -110,8 +110,8 @@ def evaluate_one(
         status = "eligible"
         derated = perf.requests_per_s_capacity * slo.utilization_target
         reason = (
-            f"eligible: {replicas} replica(s) per instance, {derated:.4g} req/s and "
-            f"{perf.decode_tokens_per_s * slo.utilization_target:.4g} output tokens/s each "
+            f"eligible: {replicas} replica(s) per instance, {derated:,.2f} req/s and "
+            f"{perf.decode_tokens_per_s * slo.utilization_target:,.2f} output tokens/s each "
             f"(derated), perf {perf.backend}/{perf.confidence}"
         )
     usd_per_rps = (

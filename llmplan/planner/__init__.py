@@ -86,6 +86,12 @@ def _relax(used: Sequence[Column], request: PlanRequest) -> Relaxation:
     )
 
 
+def _headroom(capacity: float, demand: float) -> str:
+    if demand <= 0:
+        return "n/a (no demand)"
+    return f"+{max(0.0, (capacity / demand - 1) * 100):.1f}%"
+
+
 def _replicas(counts: Sequence[tuple[Column, int]]) -> tuple[ReplicaPlan, ...]:
     return tuple(
         ReplicaPlan(
@@ -242,6 +248,10 @@ def plan(request: PlanRequest) -> PlanResult:
         f"${relax.requests_shadow_price + 0.0:.4g}/day per req/s), token demand "
         f"{'tight' if relax.tokens_tight else 'slack'} (shadow price "
         f"${relax.tokens_shadow_price + 0.0:.4g}/day per output token/s)"
+    )
+    assumptions.append(
+        "headroom of the whole-instance fleet over demand: requests "
+        f"{_headroom(capacity_rps, demand_rps)}, tokens {_headroom(capacity_tps, demand_tps)}"
     )
     if solution.status == "feasible_time_limit":
         assumptions.append(
