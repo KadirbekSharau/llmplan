@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, get_args
 
 from llmplan.catalog.hardware import GPUSpec
@@ -11,6 +11,9 @@ from llmplan.catalog.models import ModelSpec
 from llmplan.memory.fit import FitRequest, FitResult
 from llmplan.memory.kv_cache import kv_bytes_per_token_total
 from llmplan.memory.weights import model_info
+from llmplan.perf.benchmarks import BenchmarkRow
+from llmplan.perf.config import ReplicaConfig
+from llmplan.perf.estimate import INPUT_STAT_FIELDS, OUTPUT_STAT_FIELDS, PerfEstimate, StatsLike
 from llmplan.render import register
 from llmplan.types import KVDType
 
@@ -49,3 +52,26 @@ class JsonRenderer:
 
     def gpus(self, gpus: Mapping[str, GPUSpec]) -> str:
         return _dumps([gpu.model_dump(mode="json") for gpu in gpus.values()])
+
+    def perf_estimate(
+        self,
+        model: ModelSpec,
+        gpu: GPUSpec,
+        config: ReplicaConfig,
+        stats: StatsLike,
+        result: PerfEstimate,
+    ) -> str:
+        return _dumps(
+            {
+                **result.model_dump(mode="json"),
+                "model": model.id,
+                "gpu": gpu.id,
+                "config": config.model_dump(mode="json"),
+                "stats": {
+                    name: getattr(stats, name) for name in (*INPUT_STAT_FIELDS, *OUTPUT_STAT_FIELDS)
+                },
+            }
+        )
+
+    def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str:
+        return _dumps([row.model_dump(mode="json") for row in rows])

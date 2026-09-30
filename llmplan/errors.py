@@ -45,3 +45,11 @@ class InfeasiblePlan(LLMPlanError):
 
 class SolverError(LLMPlanError):
     """M4: backend failure or time limit reached without an incumbent."""
+
+
+class PerfError(LLMPlanError):
+    """M3: no performance backend could produce an estimate; the message says why."""
+
+
+class BenchmarkError(CatalogError):
+    """M3: a benchmark row is malformed or below the physical floor; names file and row."""

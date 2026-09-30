@@ -50,7 +50,31 @@ uv run llmplan model-info --model fixture:qwen2.5-7b
 uv run llmplan gpus --format json
 ```
 
-Exit codes: 0 success, 2 usage/validation, 3 catalog/fetch error. Shipped fixtures:
+**`llmplan perf estimate`** — throughput, TTFT, and TPOT of one replica under a workload's
+token distribution. `--backend auto` (default) interpolates published benchmark rows
+(`data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request
+shape, and otherwise falls back to a roofline bound; the output states the backend,
+confidence (`measured`, `interpolated`, or `roofline`), assumptions, and sources.
+
+```
+uv run llmplan perf estimate --model fixture:llama3-70b --gpu h100-sxm-80gb --tp 4 \
+  --in-mean 512 --in-p50 400 --in-p95 1500 --out-mean 256 --out-p50 200 --out-p95 800
+```
+
+Options: `--dtype`, `--max-num-seqs 256`, `--max-model-len 8192`,
+`--backend {auto,roofline,table}`, `--format {text,json}`. All six token statistics are
+required. `--trace PATH` is reserved for M2 (workload ingestion) and currently exits 2.
+Latencies are service times without queueing.
+
+**`llmplan perf benchmarks`** — the shipped benchmark rows, optionally filtered by GPU and
+model (fixture ids match through `data/benchmarks/aliases.yaml`).
+
+```
+uv run llmplan perf benchmarks --gpu h100-sxm-80gb --model fixture:llama3-8b
+```
+
+Exit codes: 0 success, 1 no performance estimate possible (`perf estimate`), 2
+usage/validation, 3 catalog/fetch error (including invalid benchmark rows). Shipped fixtures:
 `fixture:llama3-70b`, `fixture:llama3-8b`, `fixture:mistral-7b-v0.1`, `fixture:qwen2.5-7b`.
 
 ## Development

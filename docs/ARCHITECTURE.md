@@ -124,9 +124,12 @@ llmplan/
     formats/             # registry: azure2023, azure2024, burstgpt, csv
     stats.py             # peak windows, token distributions
   perf/                  # M3
-    backend.py           # PerfBackend protocol
+    config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
+    estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
+    roofline.py          # roofline backend (first-principles bounds)
+    benchmarks.py        # BenchmarkRow/BenchmarkTable, YAML loader, physical-bound check
     table.py             # benchmark-table interpolation backend
-    vidur.py             # optional Vidur backend (lazy import)
+    vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
     model.py             # MathOpt formulation
     solve.py             # backend selection, time limits, determinism
@@ -141,11 +144,12 @@ llmplan/
     vllm_cmd.py
     ...
   cli.py                 # typer app; thin
+  cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
   prices.yaml
-  benchmarks/            # M3
+  benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
 tests/
   unit/<package>/
@@ -248,9 +252,74 @@ class FitResult(BaseModel, frozen=True):
     confidence: Literal["exact", "estimated"]   # "estimated" if any override/assumption used
 ```
 
-Later milestones add `Workload`, `PerfEstimate`, `SLO`, `PlanRequest`, `PlanResult`,
-`Timeline` following the same conventions. Their fields are specified in their design docs
-and copied here when merged.
+```python
+# llmplan/perf/estimate.py (M3)
+@runtime_checkable
+class StatsLike(Protocol):             # read-only properties, all float, tokens per request
+    input_tokens_mean; input_tokens_p50; input_tokens_p95
+    output_tokens_mean; output_tokens_p50; output_tokens_p95
+    # The WorkloadStats fields M3 reads (M2_DESIGN.md section 3). M3 was built in parallel
+    # with M2, so it types `stats` with this protocol instead of importing llmplan.workload;
+    # M2's WorkloadStats satisfies it structurally.
+
+class PerfEstimate(BaseModel, frozen=True):
+    backend: Literal["roofline", "table"]
+    confidence: Literal["roofline", "interpolated", "measured"]
+    effective_batch: int                # ge=1; concurrency the estimate assumes
+    decode_tokens_per_s: float          # aggregate output tokens/s for the replica
+    prefill_tokens_per_s: float         # aggregate input tokens/s
+    requests_per_s_capacity: float      # effective_batch / service time per request
+    ttft_ms_p50: float                  # service time only, no queueing
+    ttft_ms_p95: float
+    tpot_ms_p50: float
+    tpot_ms_p95: float
+    assumptions: tuple[str, ...]
+    source_urls: tuple[str, ...]        # empty for roofline
+
+class PerfBackend(Protocol):
+    name: str
+    def estimate(self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig,
+                 stats: StatsLike) -> PerfEstimate | None: ...   # None = cannot answer
+    def explain(self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig,
+                stats: StatsLike) -> str: ...   # why estimate() returned None (one line)
+
+# llmplan/perf/config.py (M3)
+class ReplicaConfig(BaseModel, frozen=True):
+    tensor_parallel: int = 1            # ge=1
+    dtype: DType = "bf16"
+    kv_dtype: KVDType = "bf16"
+    max_num_seqs: int = 256             # gt=0
+    max_model_len: int                  # <= model.max_position_embeddings (checked by estimate)
+    gpu_memory_utilization: float = 0.9 # 0 < x <= 1
+    max_num_batched_tokens: int = 8192  # gt=0
+
+# llmplan/perf/benchmarks.py (M3)
+class BenchmarkRow(BaseModel, frozen=True):
+    model_id: str                       # canonical id (see aliases.yaml) or fixture id
+    gpu_id: str                         # FK -> GPUSpec.id; must equal the file stem
+    engine: Literal["vllm", "trtllm", "sglang", "nim"]   # nim: container, engine unnamed
+    engine_version: str
+    tensor_parallel: int
+    dtype: DType
+    concurrency: int                    # concurrent requests during the measurement
+    input_len: int                      # tokens
+    output_len: int
+    output_tokens_per_s: float          # aggregate output throughput
+    ttft_ms_p50: float | None
+    ttft_ms_p95: float | None
+    tpot_ms_p50: float | None
+    tpot_ms_p95: float | None
+    source_url: str
+    as_of: date
+
+class BenchmarkTable(BaseModel, frozen=True):
+    rows: tuple[BenchmarkRow, ...]
+    aliases: dict[str, str]             # model id -> canonical id; canonical(id) method
+```
+
+Later milestones add `Workload`, `SLO`, `PlanRequest`, `PlanResult`, `Timeline` following
+the same conventions. Their fields are specified in their design docs and copied here when
+merged.
 
 ---
 
@@ -264,7 +333,8 @@ Downstream code calls only these.
 | M1 (implemented) | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
 | M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
 | M2 | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None) -> Workload` |
-| M3 | `llmplan.perf.estimate` | `(model, gpu, tp, config, workload_stats, *, backend="table") -> PerfEstimate` |
+| M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
+| M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` |
 | M5 | `llmplan.simulate.replay` | `(PlanResult, Workload) -> Timeline` |
 
@@ -280,9 +350,9 @@ no entry points, until an external contributor needs one.
 |---|---|---|---|
 | Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
 | Trace formats | `workload/formats` | `parse(path) -> Workload` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
-| Perf backends | `perf` | `PerfBackend` protocol | `table` (M3), `vidur` (optional) |
+| Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); later milestones add a method per new result | `text`, `json` (M1), `vllm_cmd` (M4) |
 
 ---
 
@@ -297,10 +367,13 @@ class ValidationError(LLMPlanError): ...       # wraps pydantic errors at bounda
 class UnknownRegistryKey(LLMPlanError): ...    # registry get() with an unregistered key (section 6)
 class InfeasiblePlan(LLMPlanError): ...        # M4: no fleet satisfies constraints; carries reason
 class SolverError(LLMPlanError): ...           # M4: backend failure / time limit without incumbent
+class PerfError(LLMPlanError): ...             # M3: no perf backend could answer; names each tried
+class BenchmarkError(CatalogError): ...        # M3: bad benchmark row; names file, row index, model_id
 ```
 
-CLI maps these to exit codes 2 (usage/validation, unknown registry key), 3 (catalog/fetch),
-4 (infeasible), 5 (solver). Messages are one line, actionable, and name the offending field or id.
+CLI maps these to exit codes 2 (usage/validation, unknown registry key), 3 (catalog/fetch,
+including `BenchmarkError`), 4 (infeasible), 5 (solver); `PerfError` has no mapping and
+exits 1. Messages are one line, actionable, and name the offending field or id.
 
 ---
 
@@ -309,6 +382,10 @@ CLI maps these to exit codes 2 (usage/validation, unknown registry key), 3 (cata
 - `data/gpus.yaml`: list of `GPUSpec`. `data/prices.yaml`: list of `PriceRow`. Both validated
   on load; a bad row fails the whole load with the row index and field.
 - Users may pass `--gpus`/`--prices` to override with their own files (same schema).
+- `data/benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `data/benchmarks/aliases.yaml`:
+  mapping of model id -> canonical id. Every row must resolve to a model fixture (directly or
+  through an alias) and pass the physical floor (roofline at 100% bandwidth and MFU), or the
+  whole load fails with `BenchmarkError` naming the file, row index, and model id.
 - Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
 
