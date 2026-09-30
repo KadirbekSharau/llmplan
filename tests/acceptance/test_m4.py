@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import pytest
 
+from llmplan import render
 from llmplan.errors import InfeasiblePlan
 from llmplan.planner import SLO, plan
 from llmplan.planner.result import PlanResult
+from llmplan.render.vllm_cmd import serve_command
 from tests.conftest import UseFakePerf
 from tests.fake_planner import ROW_A, ROW_B, FakePerf, request
 
@@ -105,3 +107,27 @@ def test_10_7_gpu_packing(fake_perf: UseFakePerf) -> None:
     replicas = {r.candidate.config.tensor_parallel: r.count for r in result.replicas}
     assert replicas == {4: 2}
     assert result.cost_usd_per_day == 456.0
+
+
+# 10.8 CP-SAT agrees with HiGHS.
+def test_10_8_cp_sat_agrees_with_highs(fake_perf: UseFakePerf) -> None:
+    fake_perf(A_B_CAPACITY)
+    highs = plan(request(34))
+    cp_sat = plan(request(34, solver="cp_sat"))
+    assert cp_sat.solver.backend == "cp_sat"
+    assert _fleet(cp_sat) == _fleet(highs) == {"b-8x": 1, "a-1x": 1}
+    assert cp_sat.cost_usd_per_day == highs.cost_usd_per_day == 504.0
+
+
+# 10.11 Determinism and renderer.
+def test_10_11_determinism_and_renderer(fake_perf: UseFakePerf) -> None:
+    fake_perf(A_B_CAPACITY)
+    req = request(34)
+    first = render.get("json").plan(req, plan(req))
+    second = render.get("json").plan(req, plan(req))
+    assert first == second
+    fp8_request = request(34, dtype_choices=("fp8",))
+    fp8 = plan(fp8_request)
+    replica = fp8.replicas[0]
+    assert replica.candidate.config.dtype == "fp8"
+    assert "--quantization fp8" in serve_command(fp8_request.model, replica.candidate.config)

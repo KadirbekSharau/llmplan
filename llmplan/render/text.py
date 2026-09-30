@@ -13,7 +13,10 @@ from llmplan.memory.weights import model_info, weight_bytes
 from llmplan.perf.benchmarks import BenchmarkRow
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate, StatsLike
+from llmplan.planner.request import PlanRequest
+from llmplan.planner.result import PlanResult
 from llmplan.render import register
+from llmplan.render.plan_text import plan_text
 
 LABEL_WIDTH = 10
 
@@ -183,3 +186,6 @@ class TextRenderer:
         lines.append(f"{len(rows)} rows")
         lines.extend(f"source: {url} (as of {as_of})" for url, as_of in sources)
         return "\n".join(lines) + "\n"
+
+    def plan(self, request: PlanRequest, result: PlanResult) -> str:
+        return plan_text(request, result)

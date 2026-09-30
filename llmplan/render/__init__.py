@@ -18,10 +18,12 @@ if TYPE_CHECKING:
     from llmplan.perf.benchmarks import BenchmarkRow
     from llmplan.perf.config import ReplicaConfig
     from llmplan.perf.estimate import PerfEstimate, StatsLike
+    from llmplan.planner.request import PlanRequest
+    from llmplan.planner.result import PlanResult
 
 
 class Renderer(Protocol):
-    """Formats the results of each command (`fit`, `model-info`, `gpus`, `perf ...`)."""
+    """Formats the results of each command (`fit`, `model-info`, `gpus`, `perf ...`, `plan`)."""
 
     def fit(self, request: FitRequest, result: FitResult) -> str: ...
 
@@ -39,6 +41,8 @@ class Renderer(Protocol):
     ) -> str: ...
 
     def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str: ...
+
+    def plan(self, request: PlanRequest, result: PlanResult) -> str: ...
 
 
 _REGISTRY: dict[str, Renderer] = {}
@@ -63,6 +67,6 @@ def get(key: str) -> Renderer:
         raise UnknownRegistryKey(f"unknown output format {key!r}; known: {known}") from None
 
 
-from llmplan.render import json_render, text  # noqa: E402
+from llmplan.render import json_render, text, vllm_cmd  # noqa: E402
 
-__all__ = ["Renderer", "get", "json_render", "register", "text"]
+__all__ = ["Renderer", "get", "json_render", "register", "text", "vllm_cmd"]
