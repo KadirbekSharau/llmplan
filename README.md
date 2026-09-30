@@ -93,9 +93,10 @@ uv run llmplan perf estimate --model fixture:llama3-70b --gpu h100-sxm-80gb --tp
 ```
 
 Options: `--dtype`, `--max-num-seqs 256`, `--max-model-len 8192`,
-`--backend {auto,roofline,table}`, `--format {text,json}`. All six token statistics are
-required. `--trace PATH` is reserved for M2 (workload ingestion) and currently exits 2.
-Latencies are service times without queueing.
+`--backend {auto,roofline,table}`, `--format {text,json}`. Pass either all six token
+statistics or `--trace PATH`, which computes them from a trace as `llmplan workload stats`
+does (`uv run llmplan perf estimate --model fixture:llama3-8b --gpu l40s-48gb --trace
+tests/fixtures/workload_10.csv`). Latencies are service times without queueing.
 
 **`llmplan perf benchmarks`** — the shipped benchmark rows, optionally filtered by GPU and
 model (fixture ids match through `data/benchmarks/aliases.yaml`).

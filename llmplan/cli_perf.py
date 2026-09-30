@@ -16,9 +16,10 @@ from llmplan import render
 from llmplan.catalog.hardware import GPUSpec, load_gpus
 from llmplan.catalog.models import load_model
 from llmplan.errors import CatalogError, ValidationError
-from llmplan.perf import ReplicaConfig, estimate
+from llmplan.perf import ReplicaConfig, StatsLike, estimate
 from llmplan.perf.benchmarks import load_benchmarks
 from llmplan.types import DType
+from llmplan.workload import compute_stats, load_workload
 
 perf_app = typer.Typer(
     name="perf",
@@ -67,13 +68,14 @@ STAT_FLAGS = {
 }
 
 
-def _stats(trace: Path | None, values: dict[str, float | None]) -> ExplicitStats:
+def _stats(trace: Path | None, values: dict[str, float | None]) -> StatsLike:
+    given = [STAT_FLAGS[name] for name, value in values.items() if value is not None]
     if trace is not None:
-        # TODO(M2): build WorkloadStats from the trace once M2 (llmplan.workload) is merged.
-        raise ValidationError(
-            "--trace needs workload ingestion (M2), which is not available yet; "
-            f"pass {' '.join(STAT_FLAGS.values())} instead"
-        )
+        if given:
+            raise ValidationError(
+                f"pass either --trace or the token statistics, not both (got {', '.join(given)})"
+            )
+        return compute_stats(load_workload(trace))
     missing = [STAT_FLAGS[name] for name, value in values.items() if value is None]
     if missing:
         raise ValidationError(f"missing workload statistics: {', '.join(missing)} (or --trace)")
@@ -91,7 +93,7 @@ def estimate_command(
         int, typer.Option("--max-model-len", help="vLLM max_model_len.")
     ] = 8192,
     trace: Annotated[
-        Path | None, typer.Option("--trace", help="Workload trace (requires M2).")
+        Path | None, typer.Option("--trace", help="Workload trace file (instead of the stats).")
     ] = None,
     in_mean: Annotated[float | None, typer.Option("--in-mean", help="Mean input tokens.")] = None,
     in_p50: Annotated[float | None, typer.Option("--in-p50", help="p50 input tokens.")] = None,
