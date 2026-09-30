@@ -11,7 +11,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M2 | designed | m2-workload |
 | M3 | designed | m3-perf |
 | M4 | designed | m4-planner |
-| M5 | not designed | |
+| M5 | designed | m5-simulate |
 | M6 | not designed | |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
