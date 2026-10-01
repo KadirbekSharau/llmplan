@@ -200,6 +200,24 @@ def timeline_window_s(span_s: float) -> float:
     return next(w for w in candidates if w >= lower * (1 - 1e-12))
 
 
+def window_choices(window_s: float) -> tuple[float, ...]:
+    """The Timeline tab's windows (M9): round values (1, 2 or 5 x 10^k s) from a fifth of
+    `window_s` to five times it; `window_s` itself is one when it is round."""
+    top = math.floor(math.log10(window_s)) + 1
+    values = (round(s * 10.0**e, 12) for e in range(top - 2, top + 1) for s in _WINDOW_STEPS)
+    return tuple(w for w in values if window_s / 5 * (1 - 1e-9) <= w <= window_s * 5 * (1 + 1e-9))
+
+
+def replay_window(
+    run: PlanRun, workload: Workload, window_s: float, gpus: Mapping[str, GPUSpec]
+) -> Timeline:
+    """The run's replay repeated with windows of `window_s` (the Timeline tab's selector,
+    M9): same plan, trace, routing and budgets; the plan is not recomputed."""
+    options = run.timeline.options.model_copy(update={"window_s": window_s})
+    with _RUN_LOCK:
+        return replay(run.result, workload, slo=run.request.slo, options=options, gpus=gpus)
+
+
 def sim_options(stats: WorkloadStats) -> SimOptions:
     """Replay settings: the auto window over the trace's duration and the 200,000-request
     cap of section 6. Budgets come from the plan's SLO in `run_plan`."""

@@ -84,7 +84,7 @@ def test_9_2_preset_end_to_end() -> None:
     assert not at.error
     assert cost_per_day(at) > 0
     assert any("--tensor-parallel-size" in code.value for code in at.code)
-    assert len(at.image) >= 1  # the timeline figure
+    assert len(at.get("vega_lite_chart")) >= 1  # the timeline figure (M9: Altair, was st.image)
 
 
 # 9.3 Infeasible surfaces cleanly: one error element, no traceback anywhere.

@@ -25,7 +25,7 @@ from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
 from llmplan.errors import InfeasiblePlan, LLMPlanError, ValidationError
 from llmplan.perf.uploads import upload_backends
 from llmplan.planner import SLO, PlanRequest, PlanResult
-from llmplan.simulate import SimOptions
+from llmplan.simulate import SimOptions, Timeline
 from llmplan.types import Commitment
 from llmplan.ui import calibrate, presets, state, usage_log, views, wording
 from llmplan.workload import (
@@ -83,6 +83,11 @@ def _run(
     _rows: calibrate.Rows,
 ) -> state.PlanRun:
     return state.run_plan(_request, _workload, _options, _gpus, upload_backends(_rows))
+
+
+@st.cache_data(ttl=3600, max_entries=200, show_spinner=False)
+def _rewindow(key: str, window_s: float, _run: state.PlanRun, _workload: Workload) -> Timeline:
+    return state.replay_window(_run, _workload, window_s, _catalogs()[0])
 
 
 def _seed(shipped: tuple[PriceRow, ...]) -> None:
@@ -350,7 +355,9 @@ def _plan(
     )
     options = state.sim_options(stats)
     key = state.cache_key(request, options, workload, rows)
-    return _run(key, request, workload, options, gpus, rows)
+    run = _run(key, request, workload, options, gpus, rows)
+    ss["plan_key"], ss["plan_workload"] = key, workload  # for the Timeline window selector
+    return run
 
 
 def _on_plan(
@@ -415,7 +422,8 @@ def main() -> None:
         ss["outcome"] = _on_plan(traffic, table, benchmarks)
     kind, value = ss.get("outcome", ("none", None))
     if kind == "run" and isinstance(value, state.PlanRun):
-        views.results(value)
+        key, workload = ss["plan_key"], ss["plan_workload"]
+        views.results(value, lambda window: _rewindow(key, window, value, workload))
         calibrate.report()
     elif kind == "error":
         st.error(str(value))
