@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Plain, wide terminal so typer/rich help text has no ANSI codes or narrow wrapping.
+env:
+  COLUMNS: "200"
+  NO_COLOR: "1"
+  TERM: "dumb"
+
 jobs:
   check:
     runs-on: ubuntu-latest
