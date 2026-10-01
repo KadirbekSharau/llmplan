@@ -1,7 +1,8 @@
 """Pure helpers behind the web UI (M6_DESIGN.md sections 4 and 6).
 
 Inputs to a `PlanRequest` and `SimOptions`, price-table validation through `PriceRow`, the
-cache key, the plan-and-replay run, the timeline window, and the per-session plan brake.
+cache key, the plan-and-replay run (with request-size classes, M7, also the single-class
+cost it is compared with), the timeline window, and the per-session plan brake.
 Every planning decision is a call into `llmplan.*`; nothing here imports Streamlit, so it
 is unit-testable without a browser.
 """
@@ -22,13 +23,13 @@ from pydantic import BaseModel, ConfigDict
 
 from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec
-from llmplan.errors import ValidationError
+from llmplan.errors import InfeasiblePlan, ValidationError
 from llmplan.memory.engine import EngineProfile
 from llmplan.planner import SLO, PlanOptions, PlanRequest, PlanResult, plan
 from llmplan.simulate import SimOptions, Timeline, replay
 from llmplan.types import DType
 from llmplan.ui.presets import MAX_PLANS_PER_HOUR, MAX_SIM_REQUESTS, MAX_TIME_LIMIT_S
-from llmplan.workload import Workload, WorkloadStats
+from llmplan.workload import DemandClass, Workload, WorkloadStats
 
 PRICE_COLUMNS = tuple(PriceRow.model_fields)
 SECONDS_PER_HOUR = 3600.0
@@ -40,13 +41,25 @@ _RUN_LOCK = threading.Lock()
 
 
 class PlanRun(BaseModel):
-    """The outcome of one Plan click: the request, the plan, and its replay."""
+    """The outcome of one Plan click: the request, the plan, and its replay. With
+    request-size classes (M7), `single_class_cost_usd_per_day` is the cost of the same
+    request planned without them (None when that plan is infeasible or there are no
+    classes), the base of the UI's "saving from request-size routing"."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     request: PlanRequest
     result: PlanResult
     timeline: Timeline
+    single_class_cost_usd_per_day: float | None = None
+
+    @property
+    def class_saving_pct(self) -> float | None:
+        """`(single-class cost - cost) / single-class cost * 100`, or None."""
+        base = self.single_class_cost_usd_per_day
+        if base is None:
+            return None
+        return (base - self.result.cost_usd_per_day) / base * 100
 
 
 def prices_frame(rows: Sequence[PriceRow]) -> pd.DataFrame:
@@ -109,10 +122,12 @@ def build_request(
     perf_backend: str,
     solver: str,
     time_limit_s: float,
+    classes: tuple[DemandClass, ...] = (),
 ) -> PlanRequest:
     """Collect the sidebar inputs into a `PlanRequest` (vLLM's default engine profile).
 
-    The solver time limit is capped at 30 s whatever the caller passes (section 6). Raises
+    The solver time limit is capped at 30 s whatever the caller passes (section 6).
+    `classes` are the request-size classes of the traffic (M7; empty: none). Raises
     `ValidationError` naming an empty selection or the first invalid option.
     """
     for name, chosen in (
@@ -150,6 +165,7 @@ def build_request(
         options=options,
         gpus=gpus,
         prices=prices,
+        classes=classes,
     )
 
 
@@ -200,18 +216,29 @@ def run_plan(
 ) -> PlanRun:
     """Plan, then replay the workload on the planned fleet with the request's SLO budgets.
 
-    When queues make the replay run far past the last arrival (more than 200 windows), it
-    is replayed once more with a window chosen over the full span. Runs one at a time per
-    process. Raises whatever `plan` and `replay` raise.
+    A plan with request-size classes is replayed with `class_weighted` routing and is
+    compared with the same request planned without classes. When queues make the replay
+    run far past the last arrival (more than 200 windows), it is replayed once more with a
+    window chosen over the full span. Runs one at a time per process. Raises whatever
+    `plan` and `replay` raise.
     """
+    single: float | None = None
     with _RUN_LOCK:
         result = plan(request)
+        if request.classes:
+            options = options.model_copy(update={"routing": "class_weighted"})
+            try:
+                single = plan(request.model_copy(update={"classes": ()})).cost_usd_per_day
+            except InfeasiblePlan:
+                single = None
         timeline = replay(result, workload, slo=request.slo, options=options, gpus=gpus)
         if len(timeline.windows) > MAX_WINDOWS:
             span = len(timeline.windows) * options.window_s
             wider = options.model_copy(update={"window_s": timeline_window_s(span)})
             timeline = replay(result, workload, slo=request.slo, options=wider, gpus=gpus)
-    return PlanRun(request=request, result=result, timeline=timeline)
+    return PlanRun(
+        request=request, result=result, timeline=timeline, single_class_cost_usd_per_day=single
+    )
 
 
 def admit_plan(

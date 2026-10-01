@@ -36,6 +36,7 @@ from llmplan.workload import (
     generate,
     load_workload,
 )
+from llmplan.workload.classes import classify_spec
 from llmplan.workload.synth import parse_distribution
 
 log = logging.getLogger("llmplan.ui")
@@ -44,6 +45,7 @@ CUSTOM_MODEL = "Other Hugging Face id"
 TRAFFIC_MODES = ("Preset sample", "Upload CSV", "Synthetic")
 COMMITMENTS: tuple[Commitment, ...] = ("on_demand", "reserved_1y", "reserved_3y", "spot")
 DISTRIBUTION_HELP = "fixed:N, lognormal:MEAN:SIGMA[:LO:HI] (underlying normal), or uniform:LO:HI"
+CLASSES_HELP = "Input x output token bins (median splits for 2x2); 1 sizes for the mean request"
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class Inputs:
     perf_backend: str
     solver: str
     time_limit_s: float
+    classes: str
 
 
 @st.cache_resource(show_spinner=False)
@@ -262,6 +265,9 @@ def _sidebar() -> Inputs:
             max_model_len = st.number_input(
                 "max_model_len", 256, 1_048_576, presets.DEFAULT_MAX_MODEL_LEN, 256
             )
+            classes = st.selectbox(
+                "Request-size classes", presets.CLASS_CHOICES, key="classes", help=CLASSES_HELP
+            )
             perf_backend = st.selectbox("Perf backend", presets.PERF_BACKENDS)
             solver = st.selectbox("Solver", presets.SOLVERS)
             time_limit = st.number_input(
@@ -281,6 +287,7 @@ def _sidebar() -> Inputs:
         perf_backend=perf_backend,
         solver=solver,
         time_limit_s=time_limit,
+        classes=classes,
     )
 
 
@@ -312,6 +319,7 @@ def _plan(inputs: Inputs, seen: dict[str, WorkloadStats]) -> state.PlanRun:
         perf_backend=inputs.perf_backend,
         solver=inputs.solver,
         time_limit_s=inputs.time_limit_s,
+        classes=classify_spec(workload, inputs.classes),
     )
     options = state.sim_options(stats)
     return _run(state.cache_key(request, options, workload), request, workload, options, gpus)

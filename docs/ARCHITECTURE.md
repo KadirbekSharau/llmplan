@@ -605,6 +605,9 @@ class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
     request: PlanRequest
     result: PlanResult
     timeline: Timeline
+    single_class_cost_usd_per_day: float | None = None   # M7: the request planned without
+                                         #   classes (None: no classes, or infeasible);
+                                         #   property class_saving_pct
 
 # llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
 class SamplePreset(BaseModel, frozen=True):
@@ -637,7 +640,7 @@ Downstream code calls only these.
 | M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
 | M7 | `llmplan.workload.classify` | `(workload: Workload, *, input_bins: int = 2, output_bins: int = 2, method: Literal["quantile", "fixed"] = "quantile", edges: tuple[tuple[int, ...], tuple[int, ...]] \| None = None, window_s: float = 60.0) -> tuple[DemandClass, ...]` (`window_s`, added in M7, is the peak-window length and must match the `WorkloadStats` the plan uses) |
-| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
 
 ---
 

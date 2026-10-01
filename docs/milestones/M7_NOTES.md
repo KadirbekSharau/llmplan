@@ -186,6 +186,23 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   pulp==2.8.0`); `tests/unit/test_melange_crosscheck.py` covers the llmplan side with a
   stub in place of Mélange.
 
+- **Step 8 — UI.** Advanced gains "Request-size classes" (2x2 default, 1, 3x3; the
+  selection is classified with `classify_spec` on the traffic when Plan is clicked).
+  `state.run_plan` replays a plan with classes with `class_weighted` routing and plans the
+  same request without classes; `PlanRun.single_class_cost_usd_per_day` and the
+  `class_saving_pct` property feed "Saving from request-size routing" in a new
+  "Request-size routing" section (after the replicas): the saving with the single-class
+  cost, a caption that it can be negative, a class table (bounds, share, peak demand,
+  binding, replayed TTFT p95 and violations per class) and the routing table (weight,
+  replica type, replica-equivalents, req/s). The two plans run under the same lock and
+  cache entry. The usage log is unchanged (its fields are fixed by M6's test 9.6).
+  `app.py` is 396 lines (design limit 400).
+- **Step 8 — Timing.** With 2x2 classes a UI plan runs two plans (with and without
+  classes), the class evaluation and a class-weighted replay: every bundled preset still
+  plans and replays in under 3 s through AppTest (`-m slow -k every_preset`: Azure 2024
+  conversation 2.76 s, the slowest), on this laptop while other jobs kept its load average
+  near 17 on 8 cores.
+
 ## Deviations from the design doc
 
 - **Routing weights are normalized per class.** Section 4 defines the weight as

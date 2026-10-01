@@ -145,7 +145,8 @@ FIFTY = str(FIXTURES / "workload_csv_50.csv")
 
 
 def test_plan_with_classes(tmp_path: Path) -> None:
-    args = [*BASE, "--trace", FIFTY, "--perf-backend", "roofline", "--classes", "2x2"]
+    args = [*BASE, "--trace", FIFTY, "--perf-backend", "roofline", "--tp", "1"]
+    args += ["--gpus", "l4-24gb,h100-sxm-80gb", "--classes", "2x2"]
     text = runner.invoke(app, args)
     assert text.exit_code == 0, text.stderr
     assert "\nClasses\n" in text.stdout

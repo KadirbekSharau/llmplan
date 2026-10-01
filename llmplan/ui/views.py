@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from llmplan import render
-from llmplan.planner.result import CandidateEval, PlanResult
+from llmplan.planner.result import CandidateEval, PlanResult, label
 from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
 from llmplan.render.vllm_cmd import serve_command
@@ -121,6 +121,61 @@ def fleet_and_replicas(run: state.PlanRun) -> None:
         st.code(serve_command(run.request.model, replica.candidate.config), language="bash")
 
 
+def _saving(run: state.PlanRun) -> str:
+    saving, base = run.class_saving_pct, run.single_class_cost_usd_per_day
+    if saving is None or base is None:
+        return "n/a (no fleet without classes meets the target)"
+    return f"{saving:.1f}% (sized for the mean request: {_usd(base)}/day)"
+
+
+def request_size_routing(run: state.PlanRun) -> None:
+    """With request-size classes (M7): the saving against a single-class plan, the class
+    table with each class's replayed TTFT, and the routing weights."""
+    result = run.result
+    if not result.classes:
+        return
+    st.subheader("Request-size routing")
+    st.markdown(f"Saving from request-size routing: **{escape(_saving(run))}**")
+    st.caption(
+        "Each class is sized at its own request shape, so the saving can be negative when the "
+        "mean request understates the long ones."
+    )
+    replayed = {c.class_index: c for c in run.timeline.classes}
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "class": c.index,
+                    "input tokens": f"{c.input_lo:,}..{c.input_hi:,}",
+                    "output tokens": f"{c.output_lo:,}..{c.output_hi:,}",
+                    "share": f"{c.share * 100:.1f}%",
+                    "peak req/s": round(c.peak_rps, 3),
+                    "binding": binding,
+                    "replayed TTFT p95 ms": replayed[c.index].ttft_ms_p95,
+                    "TTFT violations": f"{replayed[c.index].ttft_violation_pct:.1f}%",
+                }
+                for c, binding in zip(result.classes, result.class_binding, strict=True)
+            ]
+        ),
+        hide_index=True,
+    )
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "class": r.class_index,
+                    "weight": f"{r.weight * 100:.1f}%",
+                    "replica type": label(r.candidate),
+                    "replica-equivalents": round(r.replicas, 3),
+                    "req/s": round(r.capacity_rps, 2),
+                }
+                for r in result.routing
+            ]
+        ),
+        hide_index=True,
+    )
+
+
 def timeline(run: state.PlanRun) -> None:
     """The four-panel timeline figure of the replay (M5 renderer, PNG bytes)."""
     summary, options = run.timeline.summary, run.timeline.options
@@ -196,6 +251,7 @@ def results(run: state.PlanRun) -> None:
     """The whole main area after a successful plan."""
     answer_card(run.result)
     fleet_and_replicas(run)
+    request_size_routing(run)
     timeline(run)
     candidates(run.result)
     assumptions(run)
