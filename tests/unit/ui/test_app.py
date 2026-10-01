@@ -158,3 +158,35 @@ def test_the_confidence_banner_states_the_performance_model() -> None:
     (warning,) = at.warning  # Markdown-escaped: "\(" renders as "("
     assert warning.value.startswith("Performance model: roofline \\(uncalibrated")
     assert any("`BANDWIDTH_EFFICIENCY` = 0.7" in m.value for m in at.markdown)
+
+
+M8 = FIXTURES / "m8"
+
+
+def test_own_benchmarks_are_validated_reported_and_contributable() -> None:
+    """M8 section 5: rows validated on Plan, rejections listed, the contribute link offered;
+    500 rows are too many for a link (CSV download instead); a bad file is one error."""
+    at = app()
+    at.selectbox(key="preset").set_value(min(presets.SAMPLE_PRESETS, key=lambda p: p.rows).key)
+    at.multiselect(key="gpu_ids").set_value(["h100-sxm-80gb"])
+    data = (M8 / "benchmarks_3_rows.csv").read_bytes()
+    at.file_uploader(key="bench_upload").set_value(("rows.csv", data, "text/csv"))
+    plan(at.run())
+    assert not at.error
+    assert "Your benchmarks" in [h.value for h in at.subheader]
+    assert any("2 of 3 uploaded rows used" in m.value for m in at.markdown)
+    assert any(c.value.startswith("Row 1 rejected:") for c in at.caption)
+    (link,) = at.get("link_button")
+    assert link.proto.url.startswith("https://github.com/KadirbekSharau/llmplan/issues/new?")
+
+    header, first = data.decode().splitlines()[:2]
+    many = "\n".join([header, *[first.replace(",16,", f",{16 + i},") for i in range(500)]])
+    at.file_uploader(key="bench_upload").set_value(("many.csv", many.encode(), "text/csv"))
+    plan(at.run())
+    assert any("500 of 500 uploaded rows used" in m.value for m in at.markdown)
+    assert [b.label for b in at.get("download_button")][-1] == "Download the rows as CSV"
+
+    at.file_uploader(key="bench_upload").set_value(("bad.csv", b"a,b\n1,2\n", "text/csv"))
+    plan(at.run())
+    (error,) = at.error
+    assert error.value.startswith("benchmark CSV is missing columns")

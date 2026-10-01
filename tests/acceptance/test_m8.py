@@ -6,8 +6,10 @@ with the recorded run in docs/milestones/M8_NOTES.md.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -18,6 +20,10 @@ from llmplan.catalog.hardware import load_gpus, load_prices
 from llmplan.catalog.models import load_model
 from llmplan.cli import app
 from llmplan.memory.engine import EngineProfile
+from llmplan.perf import ReplicaConfig, estimate
+from llmplan.perf.benchmarks import BenchmarkRow
+from llmplan.perf.contribute import MAX_URL_CHARS, REPOSITORY_URL, contribute_url
+from llmplan.perf.uploads import CSV_COLUMNS, VllmRun, load_upload, upload_backends
 from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
 from llmplan.simulate.compare import compare_single_class
 from llmplan.ui import presets
@@ -27,6 +33,7 @@ from tests.acceptance.test_m6 import plan as plan_ui
 from tests.acceptance.test_m7 import two_class_request, two_class_workload
 from tests.conftest import UseFakePerf
 from tests.fake_planner import SHAPE_GPUS, FakePerf, request
+from tests.unit.perf.stats import FakeStats
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 ROOFLINE_SENTENCE = "roofline (uncalibrated first-principles model; expect ±30% on throughput)"
@@ -153,3 +160,72 @@ def test_9_2_saving_scenario_says_saves() -> None:
     assert "saves $" in text
     assert "Request-size routing saves $48.00/day (33.3%)" in text
     assert not NEGATIVE_PCT.search(text)
+
+
+# 9.3 Benchmark CSV import.
+M8_FIXTURES = FIXTURES / "m8"
+LLAMA8B = load_model("fixture:llama3-8b")
+H100 = load_gpus()["h100-sxm-80gb"]
+
+
+def test_9_3_benchmark_csv_import() -> None:
+    upload = load_upload((M8_FIXTURES / "benchmarks_3_rows.csv").read_bytes(), LLAMA8B, load_gpus())
+    assert len(upload.rows) == 2
+    (rejected,) = upload.rejected
+    assert rejected.index == 1  # the 50,000 tokens/s row
+    assert "physical floor" in rejected.reason
+    assert all(row.source_url == "user-upload" for row in upload.rows)
+    stats = FakeStats(
+        input_tokens_mean=1000,
+        input_tokens_p50=1000,
+        input_tokens_p95=1000,
+        output_tokens_mean=200,
+        output_tokens_p50=200,
+        output_tokens_p95=200,
+    )
+    config = ReplicaConfig(dtype="fp8", max_num_seqs=64, max_model_len=8192)
+    result = estimate(LLAMA8B, H100, config, stats, backends=upload_backends(upload.rows))
+    assert result.confidence == "measured"  # effective batch 64 hits the concurrency-64 row
+    assert result.source_urls == ("user-upload",)
+    assert result.decode_tokens_per_s == 4200.0
+
+
+# 9.4 vLLM benchmark JSON import.
+def test_9_4_vllm_json_import() -> None:
+    data = (M8_FIXTURES / "vllm_bench_serve.json").read_bytes()
+    doc = json.loads(data)
+    run = VllmRun(gpu_id="h100-sxm-80gb", tensor_parallel=1, dtype="bf16", engine_version="0.30.0")
+    upload = load_upload(data, LLAMA8B, load_gpus(), run=run)
+    assert upload.rejected == ()
+    (row,) = upload.rows
+    assert row.input_len == round(doc["total_input_tokens"] / doc["completed"]) == 1023
+    assert row.output_len == round(doc["total_output_tokens"] / doc["completed"]) == 128
+    assert row.output_tokens_per_s == doc["output_throughput"]
+    assert row.ttft_ms_p50 == doc["median_ttft_ms"]
+    assert row.tpot_ms_p50 == doc["median_tpot_ms"]
+    assert row.concurrency == doc["max_concurrency"]
+    assert row.ttft_ms_p95 is None  # p99_* ignored; p95_* absent at vLLM's default percentiles
+    assert (row.engine, row.gpu_id, row.source_url) == ("vllm", "h100-sxm-80gb", "user-upload")
+
+
+# 9.5 Contribute link.
+def _rows(n: int) -> list[BenchmarkRow]:
+    base = load_upload(
+        (M8_FIXTURES / "benchmarks_3_rows.csv").read_bytes(), LLAMA8B, load_gpus()
+    ).rows[0]
+    return [base.model_copy(update={"concurrency": 1 + i}) for i in range(n)]
+
+
+def test_9_5_contribute_link() -> None:
+    url, with_rows = contribute_url(_rows(20))
+    assert url.startswith(f"{REPOSITORY_URL}/issues/new?")
+    assert len(url) < MAX_URL_CHARS == 6_000
+    assert with_rows
+    (body,) = parse_qs(urlsplit(url).query)["body"]
+    assert ",".join(CSV_COLUMNS) in body.splitlines()  # the CSV header line
+    url_500, with_rows_500 = contribute_url(_rows(500))
+    assert not with_rows_500
+    assert url_500.startswith(f"{REPOSITORY_URL}/issues/new?")
+    assert len(url_500) < MAX_URL_CHARS
+    (body_500,) = parse_qs(urlsplit(url_500).query)["body"]
+    assert ",".join(CSV_COLUMNS) not in body_500

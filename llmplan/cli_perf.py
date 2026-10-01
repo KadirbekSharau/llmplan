@@ -1,11 +1,13 @@
 """`llmplan perf ...` commands: a thin typer sub-app over `llmplan.perf` (M3_DESIGN.md 6).
 
-Registered on the main app in `llmplan.cli`; errors map to exit codes there.
+Registered on the main app in `llmplan.cli`; errors map to exit codes there. M8: the
+`--benchmarks*` options (shared with `llmplan plan`) add the user's own benchmark rows to
+the table backend for one run; rejected rows are reported on stderr.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -14,10 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan import render
 from llmplan.catalog.hardware import GPUSpec, load_gpus
-from llmplan.catalog.models import load_model
+from llmplan.catalog.models import ModelSpec, load_model
 from llmplan.errors import CatalogError, ValidationError
-from llmplan.perf import ReplicaConfig, StatsLike, estimate
+from llmplan.perf import PerfBackend, ReplicaConfig, StatsLike, estimate
 from llmplan.perf.benchmarks import load_benchmarks
+from llmplan.perf.uploads import MAX_UPLOAD_BYTES, VllmRun, load_upload, upload_backends
 from llmplan.types import DType
 from llmplan.workload import compute_stats, load_workload
 
@@ -30,6 +33,23 @@ perf_app = typer.Typer(
 Format = Literal["text", "json"]
 Backend = Literal["auto", "roofline", "table"]
 FormatOpt = Annotated[Format, typer.Option("--format", help="Output format.")]
+BenchmarksOpt = Annotated[
+    Path | None,
+    typer.Option("--benchmarks", help="Your benchmark rows: llmplan CSV or vllm bench JSON."),
+]
+BenchmarksGpuOpt = Annotated[
+    str | None, typer.Option("--benchmarks-gpu", help="GPU id of a vLLM benchmark JSON.")
+]
+BenchmarksTpOpt = Annotated[
+    int | None, typer.Option("--benchmarks-tp", help="Tensor parallel of a vLLM JSON.")
+]
+BenchmarksDtypeOpt = Annotated[
+    DType | None, typer.Option("--benchmarks-dtype", help="Weight dtype of a vLLM JSON.")
+]
+BenchmarksVersionOpt = Annotated[
+    str | None,
+    typer.Option("--benchmarks-engine-version", help="vLLM version of a vLLM JSON."),
+]
 
 
 class ExplicitStats(BaseModel):
@@ -82,6 +102,47 @@ def _stats(trace: Path | None, values: dict[str, float | None]) -> StatsLike:
     return ExplicitStats.model_validate(values)
 
 
+def benchmark_backends(
+    path: Path | None,
+    model: ModelSpec,
+    gpus: Mapping[str, GPUSpec],
+    run: VllmRun | None,
+) -> dict[str, PerfBackend]:
+    """The `backends=` override for `--benchmarks PATH` (empty without it). The file is read
+    once, size-capped, validated against `model` and `gpus`; each rejected row and every
+    conversion note is printed to stderr, never its content."""
+    if path is None:
+        return {}
+    try:
+        if path.stat().st_size > MAX_UPLOAD_BYTES:
+            raise ValidationError(f"--benchmarks {path} is larger than {MAX_UPLOAD_BYTES:,} bytes")
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ValidationError(f"--benchmarks {path} is not readable: {exc.strerror}") from None
+    upload = load_upload(data, model, gpus, run=run)
+    total = len(upload.rows) + len(upload.rejected)
+    typer.echo(f"benchmarks: {len(upload.rows)} of {total} rows used", err=True)
+    for rejection in upload.rejected:
+        typer.echo(f"benchmarks: row {rejection.index} rejected: {rejection.reason}", err=True)
+    for note in upload.notes:
+        typer.echo(f"benchmarks: {note}", err=True)
+    return upload_backends(upload.rows)
+
+
+def vllm_run(
+    gpu: str | None, tp: int | None, dtype: DType | None, version: str | None
+) -> VllmRun | None:
+    """The `--benchmarks-*` values as a `VllmRun` (None without a GPU id)."""
+    if gpu is None:
+        return None
+    return VllmRun(
+        gpu_id=gpu,
+        tensor_parallel=1 if tp is None else tp,
+        dtype=dtype or "bf16",
+        engine_version=version or "unknown",
+    )
+
+
 @perf_app.command("estimate")
 def estimate_command(
     model: Annotated[str, typer.Option("--model", help="HF repo id or fixture:<name>.")],
@@ -104,6 +165,11 @@ def estimate_command(
     out_p50: Annotated[float | None, typer.Option("--out-p50", help="p50 output tokens.")] = None,
     out_p95: Annotated[float | None, typer.Option("--out-p95", help="p95 output tokens.")] = None,
     backend: Annotated[Backend, typer.Option("--backend", help="Performance backend.")] = "auto",
+    benchmarks: BenchmarksOpt = None,
+    benchmarks_gpu: BenchmarksGpuOpt = None,
+    benchmarks_tp: BenchmarksTpOpt = None,
+    benchmarks_dtype: BenchmarksDtypeOpt = None,
+    benchmarks_engine_version: BenchmarksVersionOpt = None,
     fmt: FormatOpt = "text",
 ) -> None:
     """Estimate throughput, TTFT, and TPOT of one replica of MODEL on GPU."""
@@ -124,7 +190,14 @@ def estimate_command(
         config = ReplicaConfig(
             tensor_parallel=tp, dtype=dtype, max_num_seqs=max_num_seqs, max_model_len=max_model_len
         )
-        result = estimate(spec, gpu_spec, config, stats, backend=backend)
+        run = vllm_run(  # a vLLM JSON describes this replica unless told otherwise
+            benchmarks_gpu or gpu,
+            tp if benchmarks_tp is None else benchmarks_tp,
+            benchmarks_dtype or dtype,
+            benchmarks_engine_version,
+        )
+        backends = benchmark_backends(benchmarks, spec, load_gpus(), run)
+        result = estimate(spec, gpu_spec, config, stats, backend=backend, backends=backends)
         return render.get(fmt).perf_estimate(spec, gpu_spec, config, stats, result)
 
     _run(produce)

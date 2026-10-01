@@ -53,6 +53,8 @@ jobs:
       - name: AppTest suite
         run: uv run pytest -m 'ui and not slow' --cov-fail-under=0
       - name: Coverage of the web UI modules
-        run: uv run coverage report --include='llmplan/ui/*' --fail-under=90
+        # --omit replaces pyproject's report omit list (the page modules), so all of
+        # llmplan/ui/* is measured here.
+        run: uv run coverage report --include='llmplan/ui/*' --omit='llmplan/ui/__init__.py' --fail-under=90
       - name: Slow tests
         run: uv run pytest -m 'slow and not docker and not network' --no-cov

@@ -77,7 +77,7 @@ def test_infeasible_single_class_plan_is_a_result(monkeypatch: pytest.MonkeyPatc
     req = two_class_request(trace)
     result = plan(req)
 
-    def infeasible(*_: object) -> None:
+    def infeasible(*_: object, **__: object) -> None:
         raise InfeasiblePlan("no feasible fleet: test", reason="test")
 
     monkeypatch.setattr(compare, "plan", infeasible)

@@ -28,9 +28,10 @@ from llmplan.types import DType
 
 DEFAULT_BENCHMARKS_DIR = DATA_DIR / "benchmarks"
 ALIASES_FILE = "aliases.yaml"
+USER_UPLOAD = "user-upload"  # M8: source_url of a row uploaded for one session
 
 _ID = r"^[a-z0-9][a-z0-9._-]*$"
-_URL = r"^https://\S+$"
+_URL = r"^(https://\S+|user-upload)$"
 
 
 class BenchmarkRow(BaseModel):
@@ -40,7 +41,9 @@ class BenchmarkRow(BaseModel):
     requests of `input_len` prompt and `output_len` generated tokens. Latencies are `None`
     when the source does not print them (or not their statistic). `engine` records the
     serving stack measured; `"nim"` is an NVIDIA NIM container whose inner engine the source
-    does not name, with the container version as `engine_version`.
+    does not name, with the container version as `engine_version`. `source_url` is an https
+    URL, or (M8) `"user-upload"` for a row uploaded for one session, which a shipped table
+    may not contain.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -135,6 +138,31 @@ def physical_floor_s(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> float
     return max(terms) if terms else None
 
 
+def row_problem(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> str | None:
+    """Why `row` cannot be a measurement of `model` on `gpu`, or None: tensor parallelism
+    must divide the attention heads, and the implied time per token per sequence must not
+    beat the physical floor (`physical_floor_s`, which needs bandwidth or TFLOPS)."""
+    if model.num_attention_heads % row.tensor_parallel != 0:
+        return (
+            f"tensor_parallel {row.tensor_parallel} does not divide "
+            f"num_attention_heads {model.num_attention_heads}"
+        )
+    floor_s = physical_floor_s(row, model, gpu)
+    if floor_s is None:
+        return (
+            f"gpu {row.gpu_id} has neither memory_bandwidth_gbps nor dense TFLOPS, "
+            "so the physical bound cannot be checked"
+        )
+    implied_s = row.concurrency / row.output_tokens_per_s
+    if implied_s < floor_s:
+        return (
+            f"output_tokens_per_s {row.output_tokens_per_s:g} implies "
+            f"{implied_s * 1e3:.3f} ms per token per sequence, below the physical floor "
+            f"{floor_s * 1e3:.3f} ms"
+        )
+    return None
+
+
 def _check_row(
     row: BenchmarkRow,
     where: str,
@@ -142,6 +170,8 @@ def _check_row(
     gpus: Mapping[str, GPUSpec],
     aliases: Mapping[str, str],
 ) -> None:
+    if row.source_url == USER_UPLOAD:
+        raise BenchmarkError(f"{where}: source_url {USER_UPLOAD!r} is reserved for uploads")
     if row.gpu_id not in gpus:
         raise BenchmarkError(f"{where}: unknown gpu_id {row.gpu_id!r}")
     if row.gpu_id != path.stem:
@@ -156,24 +186,9 @@ def _check_row(
         model = load_model(fixture)
     except CatalogError as exc:
         raise BenchmarkError(f"{where}: {exc}") from None
-    if model.num_attention_heads % row.tensor_parallel != 0:
-        raise BenchmarkError(
-            f"{where}: tensor_parallel {row.tensor_parallel} does not divide "
-            f"num_attention_heads {model.num_attention_heads}"
-        )
-    floor_s = physical_floor_s(row, model, gpus[row.gpu_id])
-    if floor_s is None:
-        raise BenchmarkError(
-            f"{where}: gpu {row.gpu_id} has neither memory_bandwidth_gbps nor dense TFLOPS, "
-            "so the physical bound cannot be checked"
-        )
-    implied_s = row.concurrency / row.output_tokens_per_s
-    if implied_s < floor_s:
-        raise BenchmarkError(
-            f"{where}: output_tokens_per_s {row.output_tokens_per_s:g} implies "
-            f"{implied_s * 1e3:.3f} ms per token per sequence, below the physical floor "
-            f"{floor_s * 1e3:.3f} ms"
-        )
+    problem = row_problem(row, model, gpus[row.gpu_id])
+    if problem is not None:
+        raise BenchmarkError(f"{where}: {problem}")
 
 
 def load_benchmarks(

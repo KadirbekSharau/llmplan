@@ -7,10 +7,11 @@ relaxation, and compare against the best homogeneous fleet.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from llmplan import perf
 from llmplan.errors import CatalogError, InfeasiblePlan, SolverError, ValidationError
+from llmplan.perf.estimate import PerfBackend
 from llmplan.planner import classes, explain
 from llmplan.planner.candidates import columns, evaluate_candidates, prune_dominated, rows_in_scope
 from llmplan.planner.model import HOURS_PER_DAY, build_model
@@ -29,7 +30,7 @@ from llmplan.planner.solve import solve as solve_model
 __all__ = ["SLO", "PlanOptions", "PlanRequest", "PlanResult", "plan"]
 
 
-def _validate(request: PlanRequest) -> None:
+def _validate(request: PlanRequest, backends: Mapping[str, PerfBackend] | None) -> None:
     model, opts = request.model, request.options
     if opts.max_model_len > model.max_position_embeddings:
         raise ValidationError(
@@ -43,7 +44,7 @@ def _validate(request: PlanRequest) -> None:
         if row.gpu_id not in request.gpus:
             raise CatalogError(f"price row {index} ({row.instance}): unknown gpu_id {row.gpu_id!r}")
     if opts.perf_backend != "auto":
-        perf.get(opts.perf_backend)
+        perf.get(opts.perf_backend, backends)
     check_backend(opts.solver)
 
 
@@ -61,7 +62,7 @@ def _sorted(candidates: Sequence[CandidateEval]) -> tuple[CandidateEval, ...]:
     )
 
 
-def plan(request: PlanRequest) -> PlanResult:
+def plan(request: PlanRequest, *, backends: Mapping[str, PerfBackend] | None = None) -> PlanResult:
     """Find the cheapest fleet and replica configurations meeting peak demand and the SLO.
 
     Demand is the workload's peak window (`peak_window_rps`, `peak_output_tokens_per_s`),
@@ -71,9 +72,11 @@ def plan(request: PlanRequest) -> PlanResult:
     `CatalogError` (unknown GPU id), `UnknownRegistryKey` (unknown perf backend),
     `InfeasiblePlan` with a reason built from the candidate statuses, and `SolverError`
     (backend unavailable, time limit without a fleet). Same request, same result: solves
-    are single-threaded, seeded, time-limited.
+    are single-threaded, seeded, time-limited. `backends` (M8) overrides perf backends by
+    key for this plan, as in `llmplan.perf.estimate`; it is how a session's uploaded
+    benchmark rows reach the table backend without being written anywhere.
     """
-    _validate(request)
+    _validate(request, backends)
     opts, slo, stats = request.options, request.slo, request.stats
     rows = rows_in_scope(request.prices, opts)
     if not rows:
@@ -81,10 +84,10 @@ def plan(request: PlanRequest) -> PlanResult:
             f"no price rows match gpu_ids {opts.gpu_ids or 'any'}, providers "
             f"{opts.providers or 'any'}, commitments {list(opts.commitments)}"
         )
-    candidates = evaluate_candidates(request, rows, request.gpus)
+    candidates = evaluate_candidates(request, rows, request.gpus, backends)
     class_perf = None
     if request.classes:
-        evals = classes.evaluate_classes(request, candidates, request.gpus)
+        evals = classes.evaluate_classes(request, candidates, request.gpus, backends)
         candidates = tuple(
             classes.reconcile(c, e, slo.utilization_target)
             for c, e in zip(candidates, evals, strict=True)

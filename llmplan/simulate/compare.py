@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.errors import InfeasiblePlan
+from llmplan.perf.estimate import PerfBackend
 from llmplan.planner import PlanRequest, PlanResult, plan
 from llmplan.simulate import replay
 from llmplan.simulate.timeline import SimOptions
@@ -43,19 +44,21 @@ def compare_single_class(
     *,
     options: SimOptions | None = None,
     gpus: Mapping[str, GPUSpec] | None = None,
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> ClassComparison | None:
     """Plan `request` without its classes and, with `workload`, replay that fleet on it.
 
     `result` is the plan of `request` with classes; None is returned when the request has
     none (nothing to compare). `options` are the replay options (routing is forced to
     `least_outstanding`: the single-class plan has no routing weights); `gpus` is the
-    catalog passed to `replay`. Raises what `plan` and `replay` raise, except that an
-    infeasible single-class plan is a result (cost None).
+    catalog passed to `replay`; `backends` overrides perf backends as in `plan` (uploaded
+    benchmark rows). Raises what `plan` and `replay` raise, except that an infeasible
+    single-class plan is a result (cost None).
     """
     if not request.classes:
         return None
     try:
-        single = plan(request.model_copy(update={"classes": ()}))
+        single = plan(request.model_copy(update={"classes": ()}), backends=backends)
     except InfeasiblePlan:
         return ClassComparison(
             class_cost_usd_per_day=result.cost_usd_per_day,

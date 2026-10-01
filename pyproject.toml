@@ -65,6 +65,12 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
+[tool.coverage.report]
+# Streamlit page modules run only under the AppTest suite (marker `ui`, the `ui` CI job),
+# which gates them on its own (an explicit --omit replaces this list):
+#   coverage report --include='llmplan/ui/*' --omit='llmplan/ui/__init__.py' --fail-under=90
+omit = ["llmplan/ui/app.py", "llmplan/ui/views.py", "llmplan/ui/calibrate.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers -m 'not slow and not docker and not ui and not network' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"

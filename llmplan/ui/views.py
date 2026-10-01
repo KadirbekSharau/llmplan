@@ -1,4 +1,5 @@
-"""Result views of the web UI (M6_DESIGN.md section 3, main area).
+"""Result views of the web UI (M6_DESIGN.md section 3, main area; M8: the page header and
+the confidence banner).
 
 Each function renders one section from library results; values come from the plan,
 the timeline, and the existing renderers (`render.get("json")`, `serve_command`,
@@ -19,7 +20,7 @@ from llmplan.render.plan_text import baseline_saving, class_comparison_sentence
 from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
 from llmplan.render.vllm_cmd import serve_command
-from llmplan.ui import state
+from llmplan.ui import calibrate, state
 from llmplan.workload import Workload, WorkloadStats
 
 TOP_CANDIDATES = 15
@@ -34,6 +35,16 @@ def escape(text: str) -> str:
 
 def _usd(value: float | None) -> str:
     return "n/a" if value is None else f"${value:,.2f}"
+
+
+def header() -> None:
+    """The page title and what the tool does (moved from app.py in M8 to keep it short)."""
+    st.title("llmplan")
+    st.caption(
+        "The cheapest GPU fleet and vLLM settings for your model, traffic and latency target, "
+        "with a replay of the traffic on that fleet. CPU-only planning; nothing connects to a "
+        "GPU or your cluster."
+    )
 
 
 def stats_caption(workload: Workload, stats: WorkloadStats) -> None:
@@ -72,6 +83,11 @@ def confidence_banner(result: PlanResult) -> None:
                 f"- `{name}` = {value:g}: {escape(meaning)}"
                 for name, value, meaning in ROOFLINE_CONSTANTS
             )
+        )
+        st.markdown(
+            f"[How to calibrate](#{calibrate.ANCHOR}): upload your own `vllm bench serve` "
+            "results (or an llmplan CSV) in the sidebar; matching rows replace the model for "
+            "this session and the banner then says *measured (your upload)*."
         )
 
 

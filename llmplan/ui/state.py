@@ -25,6 +25,8 @@ from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec
 from llmplan.errors import ValidationError
 from llmplan.memory.engine import EngineProfile
+from llmplan.perf import PerfBackend
+from llmplan.perf.benchmarks import BenchmarkRow
 from llmplan.planner import SLO, PlanOptions, PlanRequest, PlanResult, plan
 from llmplan.simulate import SimOptions, Timeline, replay
 from llmplan.simulate.compare import ClassComparison, compare_single_class
@@ -212,11 +214,19 @@ def workload_digest(workload: Workload) -> str:
     return digest.hexdigest()
 
 
-def cache_key(request: PlanRequest, options: SimOptions, workload: Workload) -> str:
+def cache_key(
+    request: PlanRequest,
+    options: SimOptions,
+    workload: Workload,
+    benchmarks: Sequence[BenchmarkRow] = (),
+) -> str:
     """SHA-256 of the request and replay options JSON plus the workload rows' digest (the
-    timeline depends on the rows, not only on the statistics in the request)."""
+    timeline depends on the rows, not only on the statistics in the request) and (M8) the
+    uploaded benchmark rows, which change the estimates."""
+    rows = "\n".join(row.model_dump_json() for row in benchmarks)
     digest = hashlib.sha256()
-    for part in (request.model_dump_json(), options.model_dump_json(), workload_digest(workload)):
+    parts = (request.model_dump_json(), options.model_dump_json(), workload_digest(workload), rows)
+    for part in parts:
         digest.update(part.encode())
         digest.update(b"\0")
     return digest.hexdigest()
@@ -227,6 +237,7 @@ def run_plan(
     workload: Workload,
     options: SimOptions,
     gpus: Mapping[str, GPUSpec],
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> PlanRun:
     """Plan, then replay the workload on the planned fleet with the request's SLO budgets.
 
@@ -234,12 +245,15 @@ def run_plan(
     compared with the same request planned without classes, whose fleet is replayed too
     (`compare_single_class`). When queues make the replay
     run far past the last arrival (more than 200 windows), it is replayed once more with a
-    window chosen over the full span. Runs one at a time per process. Raises whatever
-    `plan` and `replay` raise.
+    window chosen over the full span. `backends` (M8) carries a session's uploaded benchmark
+    rows to the planner. Runs one at a time per process. Raises whatever `plan` and
+    `replay` raise.
     """
     with _RUN_LOCK:
-        result = plan(request)
-        comparison = compare_single_class(request, result, workload, options=options, gpus=gpus)
+        result = plan(request, backends=backends)
+        comparison = compare_single_class(
+            request, result, workload, options=options, gpus=gpus, backends=backends
+        )
         if request.classes:
             options = options.model_copy(update={"routing": "class_weighted"})
         timeline = replay(result, workload, slo=request.slo, options=options, gpus=gpus)

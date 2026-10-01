@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Literal
 
-from llmplan.perf.benchmarks import default_table
+from llmplan.perf.benchmarks import USER_UPLOAD, default_table
 from llmplan.perf.roofline import BANDWIDTH_EFFICIENCY, DECODE_MFU, P95_FACTOR, PREFILL_MFU
 
 PlanConfidence = Literal["measured", "interpolated", "roofline", "mixed"]
@@ -43,8 +43,10 @@ def combined_confidence(confidences: Iterable[str]) -> PlanConfidence:
 
 
 def source_label(url: str) -> str:
-    """A benchmark source in words: a known page's name with its `as_of` date from the
-    shipped table, or the URL itself."""
+    """A benchmark source in words: `"your upload"` (M8 section 5), a known page's name
+    with its `as_of` date from the shipped table, or the URL itself."""
+    if url == USER_UPLOAD:
+        return "your upload"
     name = next((label for prefix, label in SOURCE_LABELS.items() if url.startswith(prefix)), url)
     dates = [row.as_of for row in default_table().rows if row.source_url == url]
     return f"{name}, as of {max(dates).isoformat()}" if dates else name

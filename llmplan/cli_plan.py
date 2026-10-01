@@ -21,6 +21,15 @@ import typer
 from llmplan import render
 from llmplan.catalog.hardware import load_gpus, load_prices
 from llmplan.catalog.models import load_model
+from llmplan.cli_perf import (
+    BenchmarksDtypeOpt,
+    BenchmarksGpuOpt,
+    BenchmarksOpt,
+    BenchmarksTpOpt,
+    BenchmarksVersionOpt,
+    benchmark_backends,
+    vllm_run,
+)
 from llmplan.errors import ValidationError
 from llmplan.memory.engine import EngineProfile
 from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
@@ -128,6 +137,11 @@ def plan_command(
             "--classes", help="Request-size classes: 1, 2x2, 3x3, or fixed:<in edges>/<out edges>."
         ),
     ] = "1",
+    benchmarks: BenchmarksOpt = None,
+    benchmarks_gpu: BenchmarksGpuOpt = None,
+    benchmarks_tp: BenchmarksTpOpt = None,
+    benchmarks_dtype: BenchmarksDtypeOpt = None,
+    benchmarks_engine_version: BenchmarksVersionOpt = None,
     fmt: Annotated[
         Literal["text", "json", "vllm"], typer.Option("--format", help="Output format.")
     ] = "text",
@@ -163,10 +177,14 @@ def plan_command(
             prices=load_prices(prices, gpus=catalog),
             classes=demand_classes,
         )
-        result = plan(request)
+        run = vllm_run(benchmarks_gpu, benchmarks_tp, benchmarks_dtype, benchmarks_engine_version)
+        backends = benchmark_backends(benchmarks, request.model, catalog, run)
+        result = plan(request, backends=backends)
         if fmt == "vllm":
             return plan_commands(request, result)
-        comparison = compare_single_class(request, result, workload, gpus=catalog)
+        comparison = compare_single_class(
+            request, result, workload, gpus=catalog, backends=backends
+        )
         return render.get(fmt).plan(request, result, comparison)
 
     _run(produce)
