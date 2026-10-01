@@ -353,6 +353,7 @@ def test_8_4_class_weighted_simulation() -> None:
 # --- 8.5 Determinism of JSON output ------------------------------------------------------
 
 
+@pytest.mark.slow  # M8 9b: multi-second; runs in the `ui` CI job's slow step
 def test_8_5_determinism() -> None:
     from llmplan import render
     from llmplan.simulate import SimOptions, replay

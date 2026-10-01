@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from llmplan.cli import app
@@ -40,6 +41,7 @@ def test_simulate_text_uses_the_plan_slo(tmp_path: Path) -> None:
     assert "Assumptions" in out
 
 
+@pytest.mark.slow  # M8 9b: multi-second; runs in the `ui` CI job's slow step
 def test_simulate_json_flags_override_and_png(tmp_path: Path) -> None:
     plan = _plan_file(tmp_path, "--ttft-p95-ms", "500")
     png = tmp_path / "timeline.png"

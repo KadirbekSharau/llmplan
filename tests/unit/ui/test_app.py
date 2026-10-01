@@ -14,6 +14,8 @@ import llmplan.ui.state
 from llmplan.ui import presets
 from tests.acceptance.test_m6 import APP, PLAN_TIMEOUT_S, cost_per_day, plan
 
+pytestmark = pytest.mark.ui  # M8 9b: the Streamlit AppTest suite runs in the `ui` CI job
+
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 
