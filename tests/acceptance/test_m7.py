@@ -228,7 +228,6 @@ def test_8_1_single_class_real_catalogs() -> None:
     assert without_new_fields(one) == without_new_fields(legacy)
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the CLI and simulation commits")
 def test_8_1_cli_k1_output_matches_pre_m7(tmp_path: Path) -> None:
     """`llmplan plan` and `llmplan simulate --kv-accounting full` reproduce the pre-M7 JSON
     (captured on main at f69ec54) except for the new fields, which hold their defaults."""
@@ -336,7 +335,6 @@ def test_8_3_exactness_against_brute_force(fake_class_perf: UseFakeClassPerf) ->
 # --- 8.4 Class-weighted routing proves the plan; class-blind routing does not ------------
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the simulation commit")
 def test_8_4_class_weighted_simulation() -> None:
     from llmplan.simulate import SimOptions, replay
 
@@ -356,7 +354,6 @@ def test_8_4_class_weighted_simulation() -> None:
 # --- 8.5 Determinism of JSON output ------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the simulation commit")
 def test_8_5_determinism() -> None:
     from llmplan import render
     from llmplan.simulate import SimOptions, replay
@@ -381,7 +378,6 @@ def test_8_5_determinism() -> None:
 # --- 8b.1 Incremental KV accounting: concurrency rises to the planner's effective_batch --
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the simulation commit")
 def test_8b_1_incremental_kv_reaches_effective_batch() -> None:
     from llmplan.simulate import SimOptions, replay
 
@@ -427,7 +423,6 @@ def test_8b_1_incremental_kv_reaches_effective_batch() -> None:
 # --- 8b.2 llmplan simulate --requests-csv --------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the simulation commit")
 def test_8b_2_requests_csv(tmp_path: Path) -> None:
     from llmplan.simulate.events import REQUEST_COLUMNS
 

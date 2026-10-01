@@ -70,16 +70,19 @@ def test_9_3_two_replicas_halve_the_wait() -> None:
 
 
 # 9.4 KV limits admission: 300 tokens per request, 1000 KV tokens, so 3 run at once.
+# Pinned to M5's full reservation; M7's default incremental accounting reserves 250 tokens
+# (input + output / 2), so 4 would run (M7_NOTES.md).
 def test_9_4_kv_limits_admission_before_slots() -> None:
     plan = sim_plan(effective_batch=8, kv_token_capacity=1000)
     trace = workload([0.0] * 10, 200, 100)
-    requests = replay_requests(plan, trace).frame
+    full = SimOptions(kv_accounting="full")
+    requests = replay_requests(plan, trace, options=full).frame
     starts = requests["start_s"].tolist()
     first_complete = requests["complete_s"].iloc[0]
     assert starts[:3] == [0.0, 0.0, 0.0]
     assert starts[3] == first_complete == 0.2 + 100 * 0.01
     assert sum(start == 0.0 for start in starts) == 3
-    timeline = replay(plan, trace)
+    timeline = replay(plan, trace, options=full)
     assert timeline.windows[0].replicas[0].queue_depth_max == 7
 
 

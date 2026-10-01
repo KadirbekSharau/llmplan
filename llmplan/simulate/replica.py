@@ -75,17 +75,22 @@ def replica_specs(
 
 
 class ReplicaState:
-    """Free slots, free KV tokens, and the FIFO queue of request indices of one replica."""
+    """Free slots, free KV tokens (the reservations of running requests subtracted), the
+    FIFO queue of request indices of one replica, and (M7, incremental accounting) the KV
+    tokens actually in use: `kv_used` at `kv_time`, changing at `kv_slope` tokens/s."""
 
-    __slots__ = ("free_slots", "kv_free", "queue")
+    __slots__ = ("free_slots", "kv_free", "kv_slope", "kv_time", "kv_used", "queue")
 
     def __init__(self, spec: ReplicaSpec) -> None:
         self.free_slots = spec.slots
         self.kv_free = spec.kv_token_capacity
         self.queue: deque[int] = deque()
+        self.kv_used = 0.0
+        self.kv_slope = 0.0
+        self.kv_time = 0.0
 
     def can_admit(self, kv_tokens: int) -> bool:
-        """A request needing `kv_tokens` starts now only with a free slot and enough KV."""
+        """A request reserving `kv_tokens` starts now only with a free slot and enough KV."""
         return self.free_slots > 0 and kv_tokens <= self.kv_free
 
     def admit(self, kv_tokens: int) -> None:
@@ -95,3 +100,21 @@ class ReplicaState:
     def release(self, kv_tokens: int) -> None:
         self.free_slots += 1
         self.kv_free += kv_tokens
+
+    def advance(self, now: float) -> None:
+        """Move the KV-in-use line to `now`."""
+        self.kv_used += self.kv_slope * (now - self.kv_time)
+        self.kv_time = now
+
+    def grow(self, tokens: float, slope: float) -> None:
+        """A request starts holding `tokens` and grows at `slope` tokens/s."""
+        self.kv_used += tokens
+        self.kv_slope += slope
+
+    def shrink(self, tokens: float, slope: float, idle: bool) -> None:
+        """A request holding `tokens` (growing at `slope`) completes; an idle replica is
+        reset to exactly zero so float noise never accumulates."""
+        self.kv_used -= tokens
+        self.kv_slope -= slope
+        if idle:
+            self.kv_used = self.kv_slope = 0.0

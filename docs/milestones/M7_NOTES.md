@@ -112,6 +112,57 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   replicas, only when the plan has classes; K=1 text is unchanged. JSON gains `classes`,
   `routing` and `class_binding` (empty lists for K=1) after every pre-M7 field.
 
+- **Step 5 — `class_weighted` routing.** Requests are classified with the plan's class
+  bounds (`assign_classes`; a request outside every class goes to the nearest one).
+  "Lowest cumulative-deficit rule" is read as: send the request to the replica type whose
+  count so far is furthest below its target (`weight x requests of the class so far -
+  requests sent there`, i.e. the most negative surplus), ties to the lowest type, which is
+  a deterministic weighted round robin that keeps each type within one request of its
+  share; then the least-outstanding replica of that type (M5's rule). The target type of
+  every request depends only on the class sequence, so it is precomputed and the policy
+  keeps M5's `(outstanding, index) -> replica` signature. A replica type is a
+  `ReplicaPlan`; rules are matched to it by candidate equality (a rule naming no planned
+  replica raises `ValidationError`). Requests of a class without rules, and every request
+  on a plan without classes, are routed least-outstanding over all replicas (noted).
+- **Step 5 — Per-class results.** `Timeline.classes` holds one `ClassSummary` per plan
+  class (request count, TTFT/E2E p95, TTFT/TPOT violation percentages), for any routing
+  policy, so class-blind routing can be compared (test 8.4). Per-window per-class figures
+  were not added (the design asks for per-class p95 and violations; the window table stays
+  M5's). The text output adds one line per class.
+- **Step 5 — Incremental KV (8b).** A request reserves `input + ceil(output / 2)` tokens
+  (its mean occupancy, as the planner's `effective_batch` assumes; capped at the KV
+  capacity) for admission, and its KV in use grows linearly from `input` at admission to
+  `input + output` at completion, as the prompt allows instead of per-step events. Each
+  replica keeps the in-use line (value, slope, time) and logs value and slope after every
+  event; window means integrate the piecewise-linear function (trapezoids) and window
+  maxima take segment ends. An idle replica's line is reset to exactly zero so float noise
+  cannot accumulate. Admission reserves the mean, so in-use KV can briefly exceed the
+  cache when many long requests finish together (vLLM would preempt; not modeled, noted in
+  the assumptions; the VRAM plot already clips free memory at zero). `kv_tokens` in the
+  request log is the peak held (`input + output`, capped), as before.
+- **Step 5 — `SimOptions.kv_accounting`** defaults to `"incremental"`; `"full"` keeps M5's
+  behaviour exactly (the step-function path is untouched, so values are bit-identical).
+  `llmplan simulate --kv-accounting full` reproduces the pre-M7 simulate JSON byte for
+  byte apart from the new `options.kv_accounting` and `classes` fields (test 8.1). M5's
+  acceptance test 9.4 asserts that exactly 3 of 10 requests fit 1,000 KV tokens at 300
+  tokens each, which holds only under full reservation (incremental reserves 250, so 4
+  fit), so it now passes `SimOptions(kv_accounting="full")`, with a comment; its expected
+  values are unchanged. Every other M5 acceptance test passes unchanged under the
+  incremental default.
+- **Step 5 — CLI.** `llmplan simulate --routing auto` (the new default) picks
+  `class_weighted` for a plan with routing weights and `least_outstanding` otherwise, so
+  K=1 plans replay exactly as before; `--kv-accounting incremental|full`; `--requests-csv
+  PATH` writes the `RequestLog` frame (pandas `to_csv`, no index; an unwritable path exits
+  2). The CSV is produced by `replay_requests`, which repeats the replay; acceptable for a
+  CLI export and keeps both public functions unchanged.
+- **Step 5 — Modules.** The step-function window helpers moved from `timeline.py` to
+  `simulate/stepfn.py` with the new piecewise-linear variant; `timeline.py` is 307 lines
+  (models plus aggregation, one job) and `workload/classes.py` 316 (model, classifier,
+  spec parser, assigner of one concept), both just over the ~300-line guideline.
+- **Step 5 — Performance.** M5's 9.10 (201,865 requests, 4 replicas) now replays in 2.03 s
+  with incremental accounting (1.34 s in M5 on an idle machine; this run shared the CPU
+  with other jobs), far inside the 30 s target.
+
 ## Deviations from the design doc
 
 - **Routing weights are normalized per class.** Section 4 defines the weight as
