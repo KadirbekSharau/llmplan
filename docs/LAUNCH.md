@@ -1,12 +1,12 @@
 # LAUNCH.md — launch checklist and draft posts
 
 Drafts for the founder to review and post (M6_DESIGN.md section 10). Nothing here has been
-posted. `<URL>` is the deployed app and `<REPO>` the repository link; both are open
+posted. `https://llmplan.dev` is the deployed app and `https://github.com/KadirbekSharau/llmplan` the repository link; both are open
 decisions (docs/FOUNDER_QUESTIONS.md, questions 5 and 6, working name "llmplan").
 
 ## Checklist
 
-- [ ] Hosting chosen and deployed (docs/DEPLOY.md); `curl -fsS <URL>/_stcore/health`
+- [ ] Hosting chosen and deployed (docs/DEPLOY.md); `curl -fsS https://llmplan.dev/_stcore/health`
       returns `ok`.
 - [ ] A plan on each preset completes under 60 s on the deployed app. Locally this is
       `uv run pytest -m slow -k every_preset --no-cov -s` (each preset took under 1 s of
@@ -43,7 +43,7 @@ It runs entirely on CPU and never touches a GPU or your cluster. Bring a trace (
 BurstGPT or a simple CSV), use one of the bundled public trace samples, or generate
 synthetic traffic; prices are editable in the page. Throughput numbers come from published
 benchmark rows where they exist and a labelled roofline estimate where they don't, and
-every result lists its assumptions. Web app: <URL>. Code: <REPO>.
+every result lists its assumptions. Web app: https://llmplan.dev. Code: https://github.com/KadirbekSharau/llmplan.
 
 **What I'd like feedback on:** where the recommended fleet or settings disagree with what
 you actually run in production, and which GPUs, providers or models are missing.
@@ -65,7 +65,7 @@ providers, the per-replica tensor parallel, dtype and max_num_seqs with a copyab
 
 The VRAM side is exact arithmetic from config.json; throughput is the empirical part and
 is labelled as measured, interpolated or roofline in every result. It's a planner, not a
-benchmark: it never runs a model. Free, no login: <URL> (code: <REPO>).
+benchmark: it never runs a model. Free, no login: https://llmplan.dev (code: https://github.com/KadirbekSharau/llmplan).
 
 **What I'd like feedback on:** numbers that look off for hardware you own, and
 architectures you need that it can't parse yet (MoE and MLA are not supported).
@@ -88,7 +88,7 @@ fleet. A discrete-event replay of the trace on that fleet shows per-replica util
 KV in use and queue depth per window.
 
 It is CPU-only and offline apart from fetching config.json from Hugging Face. Web app:
-<URL>; code and a CLI (`llmplan plan`, `llmplan simulate`): <REPO>. Throughput comes from
+https://llmplan.dev; code and a CLI (`llmplan plan`, `llmplan simulate`): https://github.com/KadirbekSharau/llmplan. Throughput comes from
 published benchmark rows where available and a labelled roofline estimate elsewhere, so
 I'd value corrections from people with measured numbers.
 
