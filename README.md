@@ -260,6 +260,7 @@ the full traces (`llmplan traces fetch NAME --dest TRACES_DIR --yes`, outside th
 
 ## Project documents
 
+- [docs/OVERVIEW.md](docs/OVERVIEW.md) — what llmplan is, in one place (read first)
 - [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
 - [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/MILESTONES.md](docs/MILESTONES.md) — what is next, what shipped
