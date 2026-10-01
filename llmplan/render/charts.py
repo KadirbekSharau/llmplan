@@ -1,12 +1,13 @@
-"""Interactive charts of the web UI (M9_DESIGN.md section 3), drawn with Altair, which
-Streamlit already ships (no new dependency).
+"""Interactive charts (M9_DESIGN.md section 3) as Altair (Vega-Lite) specs, drawn by the web
+UI; Altair ships with Streamlit, so there is no new dependency. The interactive counterpart
+of `render/plots.py` (same four timeline panels), imported only by the UI.
 
 `timeline_chart` stacks four panels of a replay (demand against the plan's capacity,
 replica utilization, the fleet's VRAM split, queue depth with latency-target violations)
 on one shared time axis that zooms and pans together, with hover tooltips. Replays longer
 than `MAX_WINDOWS` windows are thinned to every k-th window so the browser stays fast.
 `routing_chart` shows each request-size class's routing weights as one stacked bar.
-Values are read from the library's results; nothing is recomputed. No Streamlit import.
+Values are read from the library's results; nothing is recomputed.
 """
 
 from __future__ import annotations

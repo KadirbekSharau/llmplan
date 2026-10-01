@@ -1,11 +1,8 @@
-"""Calibrate with your own benchmarks: the web UI side of M8_DESIGN.md section 5.
-
-A sidebar section takes an llmplan CSV or a `vllm bench serve --save-result` JSON (plus
-the GPU, tensor parallelism, dtype and vLLM version that file does not record). On Plan
-the rows are validated against the chosen model (`llmplan.perf.uploads`) and passed to
-the planner through the `backends=` override; they stay in this session's memory, are
-never written to disk and never logged. After a plan, the report lists the rows used and
-rejected, and offers the prefilled GitHub issue (or the CSV when the rows are too many).
+"""Calibrate with your own benchmarks: the web UI side of M8_DESIGN.md section 5. An llmplan
+CSV or `vllm bench serve --save-result` JSON is validated on Plan against the chosen model
+(`llmplan.perf.uploads`) and reaches the planner through `backends=`; it stays in this
+session's memory, never written or logged. After a plan, a report lists the rows used and
+rejected and offers the prefilled GitHub issue (or the CSV when the rows are too many).
 """
 
 from __future__ import annotations
@@ -30,21 +27,19 @@ Rows = tuple[BenchmarkRow, ...]
 
 @dataclass(frozen=True)
 class BenchmarkFile:
-    """An uploaded benchmark file, kept in memory only (`data` is never shown or logged);
-    `run` holds what a vLLM JSON does not record (None for an llmplan CSV)."""
+    """An upload kept in memory only; `run`: what a vLLM JSON does not record (CSV: None)."""
 
     data: bytes = field(repr=False)
     run: VllmRun | None
 
 
 def sidebar(gpus: Mapping[str, GPUSpec], dtypes: Sequence[DType]) -> BenchmarkFile | None:
-    """The calibration section (under Advanced since M9); returns the uploaded file with,
-    for a vLLM JSON, the GPU, tensor parallelism, dtype and version it does not record."""
+    """The calibration section (under Advanced, M9): the uploaded file and, for a vLLM JSON,
+    the GPU, tensor parallelism, dtype and version that it does not record."""
     st.subheader("Calibrate with your own benchmarks", anchor=ANCHOR)
     st.caption(
-        "An llmplan CSV (the benchmark row columns) or the JSON written by `vllm bench serve "
-        "--save-result`, up to 5 MB and 500 rows. Used for this session only: never stored "
-        "or logged."
+        "An llmplan CSV or a `vllm bench serve --save-result` JSON (5 MB, 500 rows), for this "
+        "session only: never stored or logged."
     )
     uploaded = st.file_uploader("Benchmark file", type=["csv", "json"], key="bench_upload")
     if uploaded is None:
@@ -65,8 +60,7 @@ def sidebar(gpus: Mapping[str, GPUSpec], dtypes: Sequence[DType]) -> BenchmarkFi
 def rows_for_plan(
     file: BenchmarkFile | None, model: ModelSpec, gpus: Mapping[str, GPUSpec]
 ) -> Rows:
-    """The valid rows of the upload, checked against the model being planned (none without
-    an upload); the full report is kept in this session's state for `report`. Raises
+    """The upload's rows valid for `model` (kept with the rejections for `report`); raises
     `ValidationError` for a file-level problem (size, rows, format)."""
     upload = None if file is None else load_upload(file.data, model, gpus, run=file.run)
     st.session_state[REPORT_KEY] = upload

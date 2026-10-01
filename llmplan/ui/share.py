@@ -1,11 +1,7 @@
-"""Share links (M9_DESIGN.md section 5): the inputs of a plan as URL query parameters.
-
-`encode` turns the page's inputs (session values keyed by widget key) into parameters:
-`model`, `traffic` (a preset key, or `synthetic` with the synthetic fields) and the target,
-hardware and advanced fields under their widget keys. `decode` checks parameters from a
-URL against the request models (`SLO`, `PlanOptions`, the synthetic `Distribution`) and the
-page's own choices and bounds, and returns the values to apply and the names it ignored.
-Uploads and price edits are not shareable. No Streamlit import.
+"""Share links (M9_DESIGN.md section 5): a plan's inputs as URL query parameters (`model`,
+`traffic`, and the other inputs under their widget keys), checked on the way back against
+the request models (`SLO`, `PlanOptions`, `Distribution`) and the page's choices and
+bounds. Uploads and price edits are not shareable.
 """
 
 from __future__ import annotations
@@ -17,22 +13,16 @@ from urllib.parse import urlencode
 from llmplan.catalog.models import is_repo_id
 from llmplan.errors import LLMPlanError
 from llmplan.planner import SLO, PlanOptions
-from llmplan.ui.presets import BOUNDS, CUSTOM_MODEL, DEFAULTS, TRAFFIC_MODES
+from llmplan.ui.presets import BOUNDS, CUSTOM_MODEL, DEFAULTS, OPTION_KEYS, TRAFFIC_MODES
 from llmplan.workload.synth import parse_distribution
 
 MAX_URL_CHARS = 2000
+Choices = Mapping[str, Sequence[Any]]
 SYNTHETIC = ("syn_rate", "syn_duration", "syn_in", "syn_out", "syn_seed")
-FIELDS = (
-    *("ttft", "tpot", "utilization", "gpu_ids", "providers", "tp", "dtypes", "seqs"),
-    *("max_model_len", "classes", "perf_backend", "solver", "time_limit"),
-)
+FIELDS = ("ttft", "tpot", "utilization", "classes", *OPTION_KEYS)
 _SLO = {"ttft": "ttft_ms_p95", "tpot": "tpot_ms_p95", "utilization": "utilization_target"}
-_OPTIONS = {
-    **{"gpu_ids": "gpu_ids", "providers": "providers", "tp": "tensor_parallel_choices"},
-    **{"dtypes": "dtype_choices", "seqs": "max_num_seqs_choices", "solver": "solver"},
-    **{"max_model_len": "max_model_len", "perf_backend": "perf_backend"},
-    "time_limit": "time_limit_s",
-}
+_CHOICE_FIELDS = {"tensor_parallel": "tensor_parallel_choices", "dtypes": "dtype_choices"}
+_CHOICE_FIELDS["max_num_seqs"] = "max_num_seqs_choices"  # PlanOptions names the rest alike
 
 
 def _text(value: Any) -> str:
@@ -61,9 +51,7 @@ def link(base: str, params: Mapping[str, str]) -> str | None:
     return url if len(url) <= MAX_URL_CHARS else None
 
 
-def decode(
-    params: Mapping[str, str], choices: Mapping[str, Sequence[Any]]
-) -> tuple[dict[str, Any], list[str]]:
+def decode(params: Mapping[str, str], choices: Choices) -> tuple[dict[str, Any], list[str]]:
     """The input values in URL `params`, and the names of the parameters ignored because
     they are unknown or invalid. `choices` holds the options of each choice input, plus
     `model_choice` (the listed models) and `preset` (the preset keys)."""
@@ -81,7 +69,7 @@ def _pick(raw: str, options: Sequence[Any]) -> Any:
     return {str(option): option for option in options}[raw]
 
 
-def _decode(name: str, raw: str, choices: Mapping[str, Sequence[Any]]) -> dict[str, Any]:
+def _decode(name: str, raw: str, choices: Choices) -> dict[str, Any]:
     if name == "model":
         if raw in choices["model_choice"]:
             return {"model_choice": raw}
@@ -111,6 +99,6 @@ def _decode(name: str, raw: str, choices: Mapping[str, Sequence[Any]]) -> dict[s
         value = _pick(raw, choices[name])
     if name in _SLO:
         SLO.model_validate({_SLO[name]: value})
-    if name in _OPTIONS:
-        PlanOptions.model_validate({"max_model_len": 1, _OPTIONS[name]: value})
+    if name in OPTION_KEYS:
+        PlanOptions.model_validate({"max_model_len": 1, _CHOICE_FIELDS.get(name, name): value})
     return {name: value}

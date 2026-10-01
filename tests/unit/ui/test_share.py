@@ -34,7 +34,7 @@ def round_trip(values: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
 
 
 def test_a_preset_plan_round_trips() -> None:
-    values = inputs(ttft=None, tpot=30.0, utilization=0.65, tp=[1, 2], classes="3x3")
+    values = inputs(ttft=None, tpot=30.0, utilization=0.65, tensor_parallel=[1, 2], classes="3x3")
     decoded, ignored = round_trip(values)
     assert ignored == []
     assert {key: values[key] for key in decoded} == decoded
@@ -70,8 +70,8 @@ def test_uploads_are_not_shareable() -> None:
         ("utilization", "2"),
         ("max_model_len", "8192.5"),
         ("gpu_ids", "h100-sxm-80gb,b999"),
-        ("tp", "1,1"),
-        ("tp", ""),
+        ("tensor_parallel", "1,1"),
+        ("tensor_parallel", ""),
         ("classes", "9x9"),
         ("model", "not a repo id"),
         ("model", "a/../b"),
