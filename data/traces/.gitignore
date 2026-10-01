@@ -1,4 +1,12 @@
-# Only the manifest is tracked; downloaded traces must never be committed.
+# Only the manifest and the bundled samples (scripts/make_samples.py) are tracked; full
+# traces must never be committed.
 *
 !.gitignore
 !manifest.yaml
+!samples/
+!samples/README.md
+!samples/azure2023_code.csv
+!samples/azure2023_conv.csv
+!samples/azure2024_code.csv
+!samples/azure2024_conv.csv
+!samples/burstgpt_1.csv

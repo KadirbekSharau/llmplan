@@ -23,7 +23,7 @@ def app() -> AppTest:
 def test_first_load_shows_the_fixture_model_info_and_preset_stats() -> None:
     at = app()
     assert any("8,030,261,248" in code.value for code in at.code)  # model-info text
-    assert any("synthetic format" in caption.value for caption in at.caption)
+    assert any("csv format, 19,999 requests" in caption.value for caption in at.caption)
     (info,) = at.info
     assert info.value == "Choose the inputs in the sidebar, then click Plan."
 
@@ -95,3 +95,18 @@ def test_unexpected_errors_show_a_request_id_not_a_traceback(
     assert error.value.startswith("Something went wrong (request id ")
     assert "internal detail" not in error.value
     assert not at.exception
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("chosen", presets.PRESETS, ids=lambda p: p.key)
+def test_every_preset_plans_under_60_s_with_default_inputs(chosen: presets.TracePreset) -> None:
+    """docs/LAUNCH.md checklist: a plan on each preset completes under 60 s (all GPUs)."""
+    at = app()
+    at.selectbox(key="preset").set_value(chosen.key)
+    at.run()
+    start = time.perf_counter()
+    plan(at)
+    elapsed = time.perf_counter() - start
+    print(f"preset {chosen.key}: {elapsed:.2f} s")
+    assert not at.error
+    assert elapsed < PLAN_TIMEOUT_S

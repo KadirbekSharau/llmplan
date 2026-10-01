@@ -94,7 +94,45 @@ SYNTHETIC_PRESET = SyntheticPreset(
     output_tokens=Distribution(kind="lognormal", mean=5.5, sigma=0.9),
 )
 
-SAMPLE_PRESETS: tuple[SamplePreset, ...] = ()
+_AZURE = "https://github.com/Azure/AzurePublicDataset"
+# Rows and windows: data/traces/samples/README.md (scripts/make_samples.py output).
+SAMPLE_PRESETS: tuple[SamplePreset, ...] = (
+    SamplePreset(
+        key="azure2024-conv",
+        label="Azure 2024 conversation: busiest + median hour (4.6% of rows)",
+        filename="azure2024_conv.csv",
+        rows=19_999,
+        source_url=_AZURE,
+    ),
+    SamplePreset(
+        key="azure2024-code",
+        label="Azure 2024 code: busiest + median hour (5.5% of rows)",
+        filename="azure2024_code.csv",
+        rows=19_999,
+        source_url=_AZURE,
+    ),
+    SamplePreset(
+        key="azure2023-conv",
+        label="Azure 2023 conversation: whole trace (58 min)",
+        filename="azure2023_conv.csv",
+        rows=19_366,
+        source_url=_AZURE,
+    ),
+    SamplePreset(
+        key="azure2023-code",
+        label="Azure 2023 code: whole trace (57 min)",
+        filename="azure2023_code.csv",
+        rows=8_819,
+        source_url=_AZURE,
+    ),
+    SamplePreset(
+        key="burstgpt-1",
+        label="BurstGPT: busiest + median hour (60% of rows)",
+        filename="burstgpt_1.csv",
+        rows=19_999,
+        source_url="https://github.com/HPMLL/BurstGPT",
+    ),
+)
 
 PRESETS: tuple[TracePreset, ...] = (*SAMPLE_PRESETS, SYNTHETIC_PRESET)
 
