@@ -15,7 +15,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M6 | done | m6-ui, PR #5 (0f64b0b) |
 | M7 | done | m7-demand-classes, PR #6 (e69d7d0) |
 | M8 | done | m8-launch, PR #8 (66a3d06); released as v0.2.0 |
-| M9 | ready for review (UI components, UX, responsiveness) | m9-ui-ux |
+| M9 | done | m9-ui-ux, PR #9 (7f68e07) |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
 
