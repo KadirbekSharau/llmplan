@@ -91,13 +91,15 @@ build -t llmplan .`.
 ## DigitalOcean Droplet (current production, set up 2026-10-01)
 
 Host: `137.184.154.129` (New York, 1 vCPU, 1 GB RAM, Ubuntu 24.04, hostname `llmplan`).
-Public URL: http://137.184.154.129 (plain HTTP until a domain exists).
+Public URL: https://137-184-154-129.sslip.io (Let's Encrypt certificate via the sslip.io
+wildcard DNS; plain HTTP on the IP redirects there). Replace with a real hostname later.
 
 One-time setup that was applied (repeat on a new Droplet):
 1. 2 GB swap file (`/swapfile`, in `/etc/fstab`) so the Docker build fits in 1 GB RAM.
 2. `apt-get install docker.io caddy ufw`; `ufw allow OpenSSH, 80/tcp, 443/tcp`; `ufw enable`.
-3. `/etc/caddy/Caddyfile`: `:80 { encode gzip; reverse_proxy 127.0.0.1:8501 }`. To add a
-   domain, replace `:80` with the hostname; Caddy obtains the certificate automatically.
+3. `/etc/caddy/Caddyfile`: `137-184-154-129.sslip.io { encode gzip; reverse_proxy 127.0.0.1:8501 }`.
+   Caddy obtains and renews the certificate automatically. To add a domain, replace the
+   hostname. Chrome's HTTPS-first mode blocks plain-HTTP sites, so HTTPS is required.
 4. `/var/lib/llmplan` owned by uid 10001 (the container user) for the usage log.
 5. Source is shipped as a `git archive` tarball (the repo is private); the image is built
    on the Droplet; the container runs with `--restart unless-stopped --memory 512m`, bound
