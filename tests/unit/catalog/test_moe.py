@@ -55,6 +55,7 @@ def test_qwen2_moe_by_hand() -> None:
     assert info.active_param_count == moe_active + 3 * dense + tail == 9_696
     arch = architectures.get("qwen_moe")
     assert arch.expert_params(model) == 4 * 384
+    assert architectures.get("llama_like").expert_params(load_model("fixture:llama3-8b")) == 0
     assert expert_weight_bytes(model, "int8") == 4 * 384  # experts are not embeddings
     assert "shared expert 12" in render.get("text").model_info(model)
 
