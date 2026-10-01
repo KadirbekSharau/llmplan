@@ -1,6 +1,7 @@
 """Plain-text rendering of a `PlanResult` (M4_DESIGN.md section 9).
 
-Sections: summary (cost against the baseline, binding constraint, solver), fleet table,
+Sections: summary (cost against the baseline, confidence in the performance estimates
+(M8), binding constraint, solver), fleet table,
 replica table with vLLM command lines, with request-size classes (M7) a class table and the
 routing table, the top candidates by $/hour per request/s with status and reason, and the
 assumptions.
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from llmplan.perf.confidence import confidence_sentence
 from llmplan.planner.result import label
 from llmplan.render.vllm_cmd import serve_command
 
@@ -52,6 +54,7 @@ def _summary(request: PlanRequest, result: PlanResult) -> list[str]:
             f"tokens/s (derated x {request.slo.utilization_target:g})",
         ),
         _line("Cost", f"{_usd(result.cost_usd_per_day)}/day  ({versus})"),
+        f"Confidence  {confidence_sentence(result.perf_confidence, result.perf_sources)}",
         _line("Binding", result.binding),
         _line(
             "Solver",

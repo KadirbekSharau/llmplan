@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from llmplan.catalog.hardware import PriceRow
 from llmplan.errors import ValidationError
 from llmplan.memory.fit import FitResult
+from llmplan.perf.confidence import PlanConfidence, combined_confidence
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate
 from llmplan.planner.request import SLO
@@ -121,6 +122,8 @@ class PlanResult(BaseModel):
     request's demand classes, `routing` the per-class routing weights over the fleet, and
     `class_binding` each class's binding label (all empty without classes; then `binding`
     is M4's, else it says whether any class's request or token demand is tight).
+    M8: the properties `perf_confidence` and `perf_sources` say how much the chosen
+    replicas' performance estimates can be trusted.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -141,6 +144,30 @@ class PlanResult(BaseModel):
     classes: tuple[DemandClass, ...] = ()
     routing: tuple[RoutingRule, ...] = ()
     class_binding: tuple[Binding, ...] = ()
+
+    @property
+    def perf_confidence(self) -> PlanConfidence:
+        """M8: the chosen replicas' `PerfEstimate.confidence`, or `"mixed"` when they differ.
+
+        A property, not a field: it is derived from `replicas`, so serialized plans (and the
+        pre-M8 JSON outputs) are unchanged."""
+        return combined_confidence(
+            r.candidate.perf.confidence for r in self.replicas if r.candidate.perf is not None
+        )
+
+    @property
+    def perf_sources(self) -> tuple[str, ...]:
+        """M8: the distinct benchmark `source_urls` behind the chosen replicas, sorted."""
+        return tuple(
+            sorted(
+                {
+                    url
+                    for r in self.replicas
+                    if r.candidate.perf is not None
+                    for url in r.candidate.perf.source_urls
+                }
+            )
+        )
 
 
 def binding_label(requests_tight: bool, tokens_tight: bool) -> Binding:

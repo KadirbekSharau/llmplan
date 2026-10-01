@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from llmplan import render
+from llmplan.perf.confidence import ROOFLINE_CONSTANTS, confidence_sentence
 from llmplan.planner.result import CandidateEval, PlanResult, label
 from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
@@ -47,6 +48,30 @@ def stats_caption(workload: Workload, stats: WorkloadStats) -> None:
     )
     for note in workload.notes:
         st.caption(escape(note))
+
+
+def confidence_banner(result: PlanResult) -> None:
+    """How much to trust the performance estimates behind the plan (M8): a warning for the
+    roofline model (or a mix), otherwise an info box, and what "uncalibrated" means."""
+    sentence = confidence_sentence(result.perf_confidence, result.perf_sources)
+    sentence = f"Performance model: {sentence}"
+    if result.perf_confidence in ("roofline", "mixed"):
+        st.warning(escape(sentence))
+    else:
+        st.info(escape(sentence))
+    with st.expander("What the confidence means"):
+        st.markdown(
+            "Measured and interpolated estimates come from published benchmark rows. "
+            "Everything else is the roofline model: weights and KV cache streamed from GPU "
+            "memory once per decode step, matmul FLOPs at a fixed utilization. Its constants "
+            "are assumptions, not measurements:"
+        )
+        st.markdown(
+            "\n".join(
+                f"- `{name}` = {value:g}: {escape(meaning)}"
+                for name, value, meaning in ROOFLINE_CONSTANTS
+            )
+        )
 
 
 def answer_card(result: PlanResult) -> None:
@@ -249,6 +274,7 @@ def downloads(run: state.PlanRun) -> None:
 
 def results(run: state.PlanRun) -> None:
     """The whole main area after a successful plan."""
+    confidence_banner(run.result)
     answer_card(run.result)
     fleet_and_replicas(run)
     request_size_routing(run)

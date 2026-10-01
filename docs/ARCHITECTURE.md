@@ -137,6 +137,7 @@ llmplan/
     roofline.py          # roofline backend (first-principles bounds)
     benchmarks.py        # BenchmarkRow/BenchmarkTable, YAML loader, physical-bound check
     table.py             # benchmark-table interpolation backend
+    confidence.py        # M8: how much to trust an estimate (one sentence per confidence)
     vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
     __init__.py          # plan() (M4 public API): validate, evaluate, prune, solve, explain
@@ -483,6 +484,10 @@ class PlanResult(BaseModel, frozen=True):
     class_binding: tuple[Binding, ...] = ()   # M7: binding label per class
     # With classes, capacity_* is what the routing LP allocates to the classes, summed, and
     # `binding` says whether any class's request or token demand is tight.
+    # M8 properties (derived from `replicas`, not serialized, so plan JSON is unchanged):
+    #   perf_confidence: Literal["measured", "interpolated", "roofline", "mixed"] -- the
+    #     chosen replicas' PerfEstimate.confidence, "mixed" when they differ
+    #   perf_sources: tuple[str, ...] -- their distinct source_urls, sorted
 
 class RoutingRule(BaseModel, frozen=True):    # M7
     class_index: int

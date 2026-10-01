@@ -145,3 +145,15 @@ def test_request_size_classes_default_to_2x2_and_show_the_routing() -> None:
     at.selectbox(key="classes").set_value("1")
     plan(at.run())
     assert "Request-size routing" not in [h.value for h in at.subheader]
+
+
+def test_the_confidence_banner_states_the_performance_model() -> None:
+    """M8 section 3: a roofline plan shows a warning banner with the constants behind it."""
+    at = app()
+    at.selectbox(key="preset").set_value(min(presets.SAMPLE_PRESETS, key=lambda p: p.rows).key)
+    at.multiselect(key="gpu_ids").set_value(["h100-sxm-80gb"])
+    plan(at.run())
+    assert not at.error
+    (warning,) = at.warning  # Markdown-escaped: "\(" renders as "("
+    assert warning.value.startswith("Performance model: roofline \\(uncalibrated")
+    assert any("`BANDWIDTH_EFFICIENCY` = 0.7" in m.value for m in at.markdown)

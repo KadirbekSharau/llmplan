@@ -11,6 +11,7 @@ from llmplan.memory.fit import FitRequest, FitResult
 from llmplan.memory.kv_cache import kv_bytes_per_token_total
 from llmplan.memory.weights import model_info, weight_bytes
 from llmplan.perf.benchmarks import BenchmarkRow
+from llmplan.perf.confidence import confidence_sentence
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate, StatsLike
 from llmplan.planner.request import PlanRequest
@@ -157,6 +158,7 @@ class TextRenderer:
                 f"{stats.output_tokens_p50:g} / p95 {stats.output_tokens_p95:g} tokens",
             ),
             _line("Backend", f"{r.backend}  (confidence: {r.confidence})"),
+            f"Confidence  {confidence_sentence(r.confidence, r.source_urls)}",
             _line("Batch", f"{r.effective_batch:,} concurrent sequences"),
             _line(
                 "Decode",
