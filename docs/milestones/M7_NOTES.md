@@ -179,6 +179,13 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   **1.27 s** (target 10 s). `tests/unit/test_brute_force.py` checks the brute force itself
   on hand-solved instances.
 
+- **Step 7 — Validation records.** Sections 6.2 and 6.3 are recorded below ("Mélange
+  cross-check", "Real-trace saving"). `scripts/melange_crosscheck.py` reproduces 6.2: it
+  builds the scenarios, solves them with `plan()`, and runs Mélange's solver from a
+  checkout passed as `--melange-dir` (PuLP is not a dependency: `uv run --with
+  pulp==2.8.0`); `tests/unit/test_melange_crosscheck.py` covers the llmplan side with a
+  stub in place of Mélange.
+
 ## Deviations from the design doc
 
 - **Routing weights are normalized per class.** Section 4 defines the weight as
@@ -324,3 +331,93 @@ overloaded and its queue never empties after the first seconds.
 `llmplan simulate --requests-csv PATH` on the pre-M7 golden plan and `workload_csv_50.csv`
 writes a header equal to `RequestLog`'s columns and 50 rows whose `arrival_s` equal the
 trace's.
+
+## Mélange cross-check (section 6.2)
+
+Recorded, not asserted. Source: https://github.com/tyler-griggs/melange-release, `main` at
+`d46ab43855bcdbfed4740a42058d2e269374ea55`, cloned into a scratch directory outside the
+repository on 2026-10-01; solver `melange/solver.py` (PuLP 2.8.0 with its bundled CBC, run
+on Apple Silicon without the README's Homebrew workaround). Mapping: a Mélange bucket is
+an llmplan class (demand = share x rate, no token demand), a GPU is a one-GPU price row at
+Mélange's hourly cost, a bucket throughput is the class capacity (already derated). A
+bucket a GPU cannot serve within the SLO is ineligible in llmplan and gets 1e-9 req/s in
+Mélange. Mélange ran at slice factors 1, 4 and 16; the table compares llmplan with the
+best of the three (USD per hour).
+
+| Scenario | Mélange (best of 1/4/16) | llmplan | Gap |
+|---|---|---|---|
+| toy (`melange/config/example.json`) | $5.69 (2 A10G + 1 A100; $6.70 at slice 1) | $4.68 (1 A10G + 1 A100) | -17.75% |
+| short-chat heavy | $5.0996 (2 L4 + 1 H100) | $5.0996 (2 L4 + 1 H100) | 0.00% |
+| long-document heavy | $13.96 (4 H100) | $13.96 (4 H100) | 0.00% |
+| mixed | $10.47 (3 H100) | $10.47 (3 H100) | 0.00% |
+
+llmplan is at or below Mélange on every scenario, as the slice-factor-to-infinity argument
+predicts. The one gap above 5% (the toy) was investigated: alone, the A100 would carry
+`6 x 0.05 + 3 x 0.05 + 15 x 0.025 + 6 x 0.05 = 1.125` GPUs of load; moving 5 of bucket
+(1, 0)'s 15 req/s to the A10G (load 1/5 per req/s) frees 0.125 and fills the A10G exactly
+(5 x 0.2 = 1.0). That split is a third of the bucket, which slices of 1/4 or 1/16 of it
+cannot express, so Mélange needs a second A10G. Rerun at slice factors 3 and 48 (multiples
+of 3), Mélange returns $4.68 (1 A10G + 1 A100), equal to llmplan.
+
+Synthetic scenarios: `fixture:llama3-8b`, fp8, tp 1, the shipped one-GPU rows g6.xlarge (L4,
+$0.8048/h), g6e.xlarge (L40S, $1.861/h) and runpod h100-sxm (H100, $3.49/h), 20 req/s, SLO
+TTFT p95 500 ms and TPOT p95 100 ms (at the UI's 50 ms no L4 bucket is eligible, which
+leaves nothing heterogeneous to compare), capacity derated by 0.8 and taken as the best of
+max_num_seqs 32/64/128/256 that meets the SLO, from the perf model (`auto`: the table
+backend on the NIM rows for H100 and L40S where a row shape is near, roofline otherwise).
+Buckets, on a 2 x 2 grid with input and output edges at 500 tokens, sit at the NIM row
+shapes: chat 200/200, generation 500/2,000, document 5,000/500, balanced 1,000/1,000
+(input/output tokens). Mixes (`[[chat, generation], [document, balanced]]`): short-chat
+heavy `[[0.70, 0.10], [0.05, 0.15]]`, long-document heavy `[[0.10, 0.05], [0.70, 0.15]]`,
+mixed `[[0.25, 0.25], [0.25, 0.25]]`. Capacities (req/s, derated): L4 chat 8.21, other
+buckets 0 (TPOT or TTFT); L40S 24.95 / 0.54 / 1.27 / 2.74; H100 51.82 / 4.91 / 5.03 / 9.22
+(chat / generation / document / balanced).
+
+Reproduce:
+
+```
+git clone https://github.com/tyler-griggs/melange-release /tmp/melange-release
+uv run --with pulp==2.8.0 python scripts/melange_crosscheck.py --melange-dir /tmp/melange-release
+```
+
+## Real-trace saving (section 6.3)
+
+The bundled Azure 2024 conversation sample (`data/traces/samples/azure2024_conv.csv`,
+19,999 requests, peak 4.18 req/s), `fixture:llama3-8b`, the shipped catalogs, default
+options (`max_model_len 8192`, every GPU and provider, tp 1/2/4/8, bf16/fp8,
+max_num_seqs 32 to 256, utilization 0.8), K=1 (`--classes 1`) against K=4 (`--classes
+2x2`). Classes (2x2 quantile): inputs 1..956 / 957..7,999 x outputs 0..39 / 40..1,200,
+shares 28.3% / 21.7% / 22.1% / 27.9%.
+
+| SLO | K=1 | K=4 | Saving from request-size routing |
+|---|---|---|---|
+| TTFT 500 ms, TPOT 50 ms (UI default) | $44.66/day (1 x g6e.xlarge, L40S) | $83.76/day (1 x runpod H100) | -87.5% |
+| TTFT 500 ms | $44.66/day (1 x L40S) | $44.66/day (1 x L40S) | 0.0% |
+| none | $19.32/day (1 x g6.xlarge, L4) | $38.63/day (2 x L4) | -100.0% |
+
+**No saving on this trace; the classes cost the same or more.** The design expected a
+saving; the measurement says otherwise, for two reasons. (1) The sample is small: its peak
+fits on one GPU, so there is nothing to split between GPU types (the cheapest feasible
+fleet is one instance either way). (2) The single-class plan sizes every replica for the
+mean request (1,650 input, 102 output tokens), and the M3 model's service time and KV
+limit are not linear in the request size, so the mean shape is optimistic: on an L4, the
+long/long class (mean input about 3,500 tokens) holds about 24 sequences of KV and serves
+about 0.8 req/s derated, so that class alone needs 1.35 L4s, while the mean shape claims
+4.35 req/s per L4 for the whole mix. Per class, the TPOT check is also stricter: the
+long-input classes miss the 50 ms TPOT on the L40S (roofline TPOT grows with the KV read
+per step), which the whole-workload check at the mean context passes. The classes plan is
+the honest one, not the K=1 plan with a discount.
+
+The same trace with its arrival times compressed 21.9-fold (x 0.0457, back to the source
+hours' request rate, peak 74.75 req/s; built in memory, not committed) shows the same: at
+TTFT 500 ms (with or without TPOT 50 ms) K=1 buys L40S + H100 for $128.42/day and K=4
+2 x H100 for $167.52/day (-30.4%), and replaying each plan on that traffic with its SLO
+gives the K=1 fleet **20.2% TTFT violations** (20.6% without the TPOT target) and the K=4
+fleet **0.0%** in every class (`class_weighted` routing).
+
+Reproduce (the two sample rows of the table):
+
+```
+uv run llmplan plan --model fixture:llama3-8b --trace data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 1
+uv run llmplan plan --model fixture:llama3-8b --trace data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
+```
