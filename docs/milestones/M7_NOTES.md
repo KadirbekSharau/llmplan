@@ -163,6 +163,22 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   with incremental accounting (1.34 s in M5 on an idle machine; this run shared the CPU
   with other jobs), far inside the 30 s target.
 
+- **Step 6 — Exactness test (section 6.1, acceptance 8.3).** `tests/brute_force.py` draws
+  seeded instances (1 to 3 rows of 1 or 2 GPUs at $0.50 to $6.00/h, at most 4 candidates:
+  tp 1 and tp 2 on two-GPU rows, 1 or 2 classes, each candidate ineligible for a class
+  with probability 1/4 through a 10 s TTFT against a 500 ms SLO, capacities 0.5 to 4 req/s
+  and 50 to 500 tokens/s per GPU, demands 0.5 to 10 req/s and 0 to 1,500 tokens/s,
+  at most 6 instances per row) and plans them through the full `plan()` pipeline with the
+  `fake_class` backend, so candidate evaluation, per-class verdicts, pruning, the MILP and
+  the cost recomputation are all under test. The brute force enumerates the 7^P instance
+  vectors by cost; for each, every maximal replica vector (replicas are free, so a
+  non-maximal vector is never better); a vector is feasible when per-class capacity checks
+  pass and (two classes) the allocation LP is feasible in GLOP. Result over the 50 seeds:
+  every MILP cost equals the brute-force optimum within 1e-6 (37 feasible, of them 15 with
+  two classes and 10 with a mixed fleet; 13 infeasible, all raising `InfeasiblePlan`), in
+  **1.27 s** (target 10 s). `tests/unit/test_brute_force.py` checks the brute force itself
+  on hand-solved instances.
+
 ## Deviations from the design doc
 
 - **Routing weights are normalized per class.** Section 4 defines the weight as

@@ -310,7 +310,6 @@ def test_8_2_cheap_gpu_serves_the_short_class_only() -> None:
 # --- 8.3 Exactness against brute force (M7_DESIGN.md section 6.1) ------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the exactness test commit")
 def test_8_3_exactness_against_brute_force(fake_class_perf: UseFakeClassPerf) -> None:
     from tests.brute_force import brute_force_optimum, random_instance
 
