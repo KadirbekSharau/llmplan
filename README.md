@@ -142,7 +142,9 @@ uv run llmplan simulate --plan plan.json --trace tests/fixtures/workload_csv_50.
 Options: `--window 60` (seconds), `--routing {least_outstanding,round_robin}`,
 `--ttft-p95-ms`, `--tpot-p95-ms` (budgets; default: the SLO recorded in the plan file, and
 without either no violations are counted), `--png PATH` (four-panel figure, rendered
-headless), `--format {text,json}`. The plan can also be piped:
+headless; its VRAM panel splits the fleet's memory into weights, KV in use and free),
+`--gpu-catalog PATH` (the GPU catalog the plan used, for total VRAM; default: shipped),
+`--format {text,json}`. The plan can also be piped:
 `uv run llmplan plan ... --format json | uv run llmplan simulate --plan /dev/stdin --trace
 TRACE`. The JSON output is byte-identical across runs.
 

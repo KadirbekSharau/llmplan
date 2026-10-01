@@ -159,7 +159,7 @@ llmplan/
     vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
     timeline_text.py     # M5 `simulate` text
     timeline_json.py     # M5 `simulate` JSON
-    plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png)
+    plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png and the UI)
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
@@ -484,6 +484,8 @@ class ReplicaWindowRecord(BaseModel, frozen=True):
     queue_depth_max: int
     requests_started: int
     requests_completed: int
+    vram_bytes_total: int | None         # M6: GPU vram_bytes x tensor parallel; None when
+                                         #   replay() was not given the GPU spec
 
 class WindowRecord(BaseModel, frozen=True):
     index: int
@@ -540,7 +542,7 @@ Downstream code calls only these.
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
-| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None) -> Timeline` (window length lives in `options`) |
+| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
 
 ---
@@ -558,7 +560,7 @@ no entry points, until an external contributor needs one.
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5) |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)`, a plain function for the binary PNG output (`llmplan simulate --png`) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
 
 ---
 

@@ -42,7 +42,9 @@ class SimOptions(BaseModel):
 class ReplicaWindowRecord(BaseModel):
     """One replica in one window. `utilization` is busy slot-seconds over
     `slots * window_s`; KV and queue means are time-weighted over the window, maxima are
-    over the states the replica passed through. Bytes are summed over the replica's GPUs."""
+    over the states the replica passed through. Bytes are summed over the replica's GPUs;
+    `vram_bytes_total` is the GPU's `vram_bytes` times tensor parallel (None when `replay`
+    was not given the GPU spec), so free VRAM is total minus weights minus KV in use."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -56,6 +58,7 @@ class ReplicaWindowRecord(BaseModel):
     queue_depth_max: int = Field(ge=0)
     requests_started: int = Field(ge=0)
     requests_completed: int = Field(ge=0)
+    vram_bytes_total: int | None = Field(ge=0)
 
 
 class WindowRecord(BaseModel):
@@ -238,6 +241,7 @@ def _replica_windows(
             queue_depth_max=int(queue_max[k]),
             requests_started=int(started[k]),
             requests_completed=int(finished[k]),
+            vram_bytes_total=spec.vram_bytes_total,
         )
         for k in range(len(bounds) - 1)
     ]

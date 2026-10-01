@@ -8,8 +8,10 @@ KV-cache bookkeeping the event loop keeps for it; it never leaves `llmplan.simul
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 
+from llmplan.catalog.hardware import GPUSpec
 from llmplan.errors import ValidationError
 from llmplan.planner.result import PlanResult, label
 
@@ -22,6 +24,8 @@ class ReplicaSpec:
     `kv_token_capacity` tokens (`fit.kv_token_capacity`) at `kv_bytes_per_token` bytes
     summed over its GPUs, `weight_bytes` summed over its GPUs, a prefill rate in tokens/s,
     and a constant time per output token (`perf.tpot_ms_p50`, the full-batch value).
+    `vram_bytes_total` is the GPU's `vram_bytes` times tensor parallel; None when the GPU
+    spec is unknown.
     """
 
     slots: int
@@ -30,13 +34,18 @@ class ReplicaSpec:
     weight_bytes: int
     prefill_tokens_per_s: float
     tpot_s: float
+    vram_bytes_total: int | None = None
 
 
-def replica_specs(plan: PlanResult) -> tuple[ReplicaSpec, ...]:
+def replica_specs(
+    plan: PlanResult, gpus: Mapping[str, GPUSpec] | None = None
+) -> tuple[ReplicaSpec, ...]:
     """Expand every `ReplicaPlan` of `plan` into `count` identical `ReplicaSpec`s, in plan order.
 
-    Raises `ValidationError` when the plan has no replicas or a planned candidate lacks a
-    fit, a performance estimate, or a positive KV-cache capacity (it could not serve).
+    `gpus` is the GPU catalog the plan was made with; a replica whose `gpu_id` it does not
+    hold (every replica, when `gpus` is None) gets `vram_bytes_total` None. Raises
+    `ValidationError` when the plan has no replicas or a planned candidate lacks a fit, a
+    performance estimate, or a positive KV-cache capacity (it could not serve).
     """
     specs: list[ReplicaSpec] = []
     for replica in plan.replicas:
@@ -49,6 +58,7 @@ def replica_specs(plan: PlanResult) -> tuple[ReplicaSpec, ...]:
                 f"replica {label(candidate)!r} has kv_token_capacity {fit.kv_token_capacity}"
             )
         tp = candidate.config.tensor_parallel
+        gpu = None if gpus is None else gpus.get(candidate.price_row.gpu_id)
         spec = ReplicaSpec(
             slots=perf.effective_batch,
             kv_token_capacity=fit.kv_token_capacity,
@@ -56,6 +66,7 @@ def replica_specs(plan: PlanResult) -> tuple[ReplicaSpec, ...]:
             weight_bytes=fit.per_gpu_weight_bytes * tp,
             prefill_tokens_per_s=perf.prefill_tokens_per_s,
             tpot_s=perf.tpot_ms_p50 / MS_PER_S,
+            vram_bytes_total=None if gpu is None else gpu.vram_bytes * tp,
         )
         specs.extend([spec] * replica.count)
     if not specs:

@@ -55,6 +55,9 @@ def test_simulate_json_flags_override_and_png(tmp_path: Path) -> None:
     assert doc["options"]["ttft_budget_ms"] == 900.0
     assert doc["options"]["tpot_budget_ms"] == 50.0
     assert doc["summary"]["n_requests"] == 50
+    replica = doc["windows"][0]["replicas"][0]
+    assert list(replica)[-1] == "vram_bytes_total"  # appended; earlier fields unchanged
+    assert replica["vram_bytes_total"] == 24_152_899_584  # shipped l4-24gb, tensor parallel 1
     assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 

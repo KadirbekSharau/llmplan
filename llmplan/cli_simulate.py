@@ -4,7 +4,8 @@ section 8).
 Registered on the main app in `llmplan.cli`. `--plan` is the `llmplan plan --format json`
 output. Latency budgets come from `--ttft-p95-ms` / `--tpot-p95-ms`, else from the SLO the
 plan was made with (`request.slo` in the plan file); with neither, violations are not
-counted and the output says so. `--png` also writes the timeline figure.
+counted and the output says so. `--png` also writes the timeline figure. `--gpu-catalog`
+(default: the shipped catalog) supplies each replica's total VRAM.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Annotated, Literal
 import typer
 
 from llmplan import render
+from llmplan.catalog.hardware import load_gpus
 from llmplan.planner.result import load_plan_json
 from llmplan.simulate import SimOptions, replay
 from llmplan.workload import load_workload
@@ -45,6 +47,10 @@ def simulate_command(
         float | None, typer.Option("--tpot-p95-ms", help="TPOT budget (default: plan SLO).")
     ] = None,
     png: Annotated[Path | None, typer.Option("--png", help="Also write the timeline PNG.")] = None,
+    gpu_catalog: Annotated[
+        Path | None,
+        typer.Option("--gpu-catalog", help="GPU catalog YAML the plan used (default: shipped)."),
+    ] = None,
     fmt: Annotated[
         Literal["text", "json"], typer.Option("--format", help="Output format.")
     ] = "text",
@@ -59,7 +65,9 @@ def simulate_command(
             ttft_budget_ms=ttft_p95_ms,
             tpot_budget_ms=tpot_p95_ms,
         )
-        timeline = replay(plan, load_workload(trace), slo=slo, options=options)
+        timeline = replay(
+            plan, load_workload(trace), slo=slo, options=options, gpus=load_gpus(gpu_catalog)
+        )
         if png is not None:
             from llmplan.render.plots import save_png  # matplotlib only when asked for
 
