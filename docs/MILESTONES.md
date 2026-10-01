@@ -120,7 +120,7 @@ Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a la
   matching vLLM's incremental block allocation); the simulator reserves input + output at
   admission, which is conservative by up to 2x in concurrency when KV binds. M7 makes the
   simulator grow KV occupancy as tokens are generated. Found during the M5 review.
-- **** to export per-request rows (M7, small).
+- **`llmplan simulate --requests-csv PATH`** to export per-request rows (M7, small).
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
 - **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
 

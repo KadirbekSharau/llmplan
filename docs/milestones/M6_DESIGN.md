@@ -110,7 +110,7 @@ price edits, never IPs. Documented in the UI footer in one sentence with the exa
   Docker steps; resource expectations (1 vCPU, 1 GB is enough for fixtures and samples).
 
 ## 8b. Carry-over item (in scope for M6)
-- Add  to  (from the candidate's GPU spec times
+- Add `vram_bytes_total` to `ReplicaWindowRecord` (from the candidate's GPU spec times
   tensor parallel) so the timeline's VRAM panel shows weights / KV in use / free, as PLAN.md
   promises. Keep the JSON byte-identical apart from the new field; update the M5 plot
   renderer and its test.

@@ -117,8 +117,8 @@ the results.
 - Simulator: incremental KV accounting (reserve input tokens at admission, grow by one
   token per decode step, release at completion); admission uses projected mean occupancy.
   Acceptance: on an overloaded single replica, steady-state concurrency rises toward the
-  planner's , within 15%.
--  exporting the  rows.
+  planner's `effective_batch`, within 15%.
+- `llmplan simulate --requests-csv PATH` exporting the `RequestLog` rows.
 
 ## 9. Allowed dependencies
 None new.
