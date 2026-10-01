@@ -28,8 +28,9 @@ PANELS = ("req/s", "utilization", "VRAM (GB)", "requests")
 
 def timeline_frame(timeline: Timeline) -> pd.DataFrame:
     """The replay in long form, one row per window, panel and series: `minute` (window
-    start), `panel`, `series`, `value`. Utilization is the mean and maximum over replicas;
-    VRAM free is left out when a replica's total is unknown."""
+    start), `panel`, `series`, `value`, and `order` (stacking order, bottom first).
+    Utilization is the mean and maximum over replicas; VRAM free is left out when a
+    replica's total is unknown."""
     rows = []
     for w in timeline.windows[:: math.ceil(len(timeline.windows) / MAX_WINDOWS)]:
         utilization = [r.utilization for r in w.replicas]
@@ -47,9 +48,9 @@ def timeline_frame(timeline: Timeline) -> pd.DataFrame:
         )
         panels = (0, 0, 1, 1, 2, 2, 2, 3, 3)
         rows += [
-            {"minute": w.start_s / 60, "panel": PANELS[p], "series": name, "value": value}
-            for p, (name, value) in zip(panels, series, strict=True)
-            if value is not None
+            {"minute": w.start_s / 60, "panel": PANELS[p], "series": name, "value": v, "order": i}
+            for i, (p, (name, v)) in enumerate(zip(panels, series, strict=True))
+            if v is not None
         ]
     return pd.DataFrame(rows)
 
@@ -73,6 +74,7 @@ def timeline_chart(timeline: Timeline) -> alt.VConcatChart:
                 x=alt.X("minute:Q", title="minutes since the first arrival", scale=domain),
                 y=alt.Y("value:Q", title=panel, stack=True if stacked else None),
                 color=alt.Color("series:N", title=None, legend=alt.Legend(orient="top")),
+                order=alt.Order("order:Q"),
                 tooltip=[
                     alt.Tooltip("minute:Q", format=",.1f"),
                     alt.Tooltip("series:N"),
@@ -92,14 +94,18 @@ def timeline_chart(timeline: Timeline) -> alt.VConcatChart:
 def routing_chart(result: PlanResult) -> alt.Chart:
     """Each class's routing weights over the replica types, one horizontal stacked bar per
     class (weights sum to 1 per class)."""
-    bounds = {
-        c.index: f"class {c.index}: in {c.input_lo:,}-{c.input_hi:,}, out {c.output_lo:,}-"
-        f"{c.output_hi:,}"
+    tokens = {
+        c.index: f"in {c.input_lo:,}-{c.input_hi:,}, out {c.output_lo:,}-{c.output_hi:,}"
         for c in result.classes
     }
     data = pd.DataFrame(
         [
-            {"class": bounds[r.class_index], "replica type": label(r.candidate), "weight": r.weight}
+            {
+                "class": f"class {r.class_index}",
+                "tokens": tokens[r.class_index],
+                "replica type": label(r.candidate),
+                "weight": r.weight,
+            }
             for r in result.routing
         ]
     )
@@ -109,8 +115,15 @@ def routing_chart(result: PlanResult) -> alt.Chart:
         .encode(
             x=alt.X("weight:Q", title="share of the class's requests", axis=alt.Axis(format="%")),
             y=alt.Y("class:N", title=None),
-            color=alt.Color("replica type:N", legend=alt.Legend(orient="bottom", columns=1)),
-            tooltip=["class:N", "replica type:N", alt.Tooltip("weight:Q", format=".1%")],
+            color=alt.Color(
+                "replica type:N", legend=alt.Legend(orient="bottom", columns=1, labelLimit=400)
+            ),
+            tooltip=[
+                "class:N",
+                "tokens:N",
+                "replica type:N",
+                alt.Tooltip("weight:Q", format=".1%"),
+            ],
         )
     )
     return chart

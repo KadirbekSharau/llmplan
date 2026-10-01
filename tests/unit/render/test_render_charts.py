@@ -50,7 +50,7 @@ def test_routing_chart_has_one_bar_segment_per_rule(run: state.PlanRun) -> None:
     (rows,) = spec["datasets"].values()
     assert len(rows) == len(run.result.routing) == 2
     assert {row["weight"] for row in rows} == {1.0}  # short -> SA, long -> SB (M7 8.2)
-    assert rows[0]["class"].startswith("class 0: in 1-1,050")
+    assert (rows[0]["class"], rows[0]["tokens"]) == ("class 0", "in 1-1,050, out 0-65")
 
 
 def test_fleet_sentence(run: state.PlanRun) -> None:

@@ -139,18 +139,18 @@ def _answer(run: state.PlanRun, stale: bool, share: Share) -> None:
 def _fleet(run: state.PlanRun, wide: bool) -> None:
     rows = [
         (
-            r.provider,
             r.instance,
             i.instances,
-            f"{r.gpu_count} x {r.gpu_id}",
             round(i.usd_per_day, 2),
+            f"{r.gpu_count} x {r.gpu_id}",
+            r.provider,
             r.price_usd_per_hour,
             r.as_of.isoformat(),
         )
         for i in run.result.fleet
         for r in [i.price_row]
     ]
-    _table("provider|instance|instances|GPUs each|$/day|$/hour each|as of", rows, wide)
+    _table("instance|instances|$/day|GPUs each|provider|$/hour each|as of", rows, wide)
     for replica in run.result.replicas:
         row, config, perf = (
             replica.candidate.price_row,
@@ -164,7 +164,7 @@ def _fleet(run: state.PlanRun, wide: bool) -> None:
             details += f"{config.max_num_seqs} · max_model_len {config.max_model_len:,}"
             if perf is not None:
                 details += f" · TTFT p95 {state.duration(perf.ttft_ms_p95)} · TPOT p95 "
-                details += f"{state.duration(perf.tpot_ms_p95)} ({perf.backend}, {perf.confidence})"
+                details += f"{state.duration(perf.tpot_ms_p95)} ({perf.confidence})"
             st.caption(escape(details))
             st.code(serve_command(run.request.model, config), language="bash")
 

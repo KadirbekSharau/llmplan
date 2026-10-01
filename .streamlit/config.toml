@@ -7,7 +7,11 @@ maxUploadSize = 50  # MB; the app also refuses anything over 50,000,000 bytes be
 [browser]
 gatherUsageStats = false  # no Streamlit telemetry from visitors' browsers
 
-[theme]
-# 4.6:1 against white (also behind the white label of a primary button) and 4.1:1 against
-# the dark theme's background, so it reads in both; the base font is left unchanged.
+# One primary colour for the light and the dark theme (set per theme, so visitors keep the
+# system light/dark switch): 4.6:1 against white (also behind a primary button's white
+# label) and 4.1:1 against the dark background. The base font is left unchanged.
+[theme.light]
+primaryColor = "#1F6FEB"
+
+[theme.dark]
 primaryColor = "#1F6FEB"
