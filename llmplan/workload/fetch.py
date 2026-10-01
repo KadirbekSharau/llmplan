@@ -1,8 +1,8 @@
 """Consented, checksum-verified download of public traces (M2_DESIGN.md section 7).
 
-`data/traces/manifest.yaml` lists each downloadable trace with its URL, SHA-256, size, and
-license. `fetch_trace` is the only code in `llmplan.workload` that touches the network; the
-trace parsers only read local files.
+The shipped trace manifest (`llmplan/data/traces/manifest.yaml`) lists each downloadable
+trace with its URL, SHA-256, size, and license. `fetch_trace` is the only code in
+`llmplan.workload` that touches the network; the trace parsers only read local files.
 """
 
 from __future__ import annotations
@@ -23,10 +23,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.errors import CatalogError, FetchError, ValidationError
+from llmplan.paths import TRACE_MANIFEST
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "data" / "traces" / "manifest.yaml"
+DEFAULT_MANIFEST_PATH = TRACE_MANIFEST  # package data (llmplan/paths.py)
 MAX_DOWNLOAD_BYTES = 2 * 2**30
 _URL = r"^https://\S+$"
 _FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -46,7 +47,7 @@ class TraceSource(BaseModel):
 
 
 def load_manifest(path: Path | None = None) -> Mapping[str, TraceSource]:
-    """Load the trace manifest (default `data/traces/manifest.yaml`) keyed by name.
+    """Load the trace manifest (default: the shipped `traces/manifest.yaml`) keyed by name.
 
     Raises `CatalogError` naming the row index and field for any invalid row or duplicate.
     """

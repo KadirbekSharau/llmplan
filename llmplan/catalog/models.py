@@ -19,11 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.catalog import architectures
 from llmplan.errors import CatalogError, FetchError, UnsupportedArchitecture
+from llmplan.paths import MODEL_FIXTURES_DIR
 from llmplan.types import Attention, DType
 
 log = logging.getLogger(__name__)
 
-DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parents[2] / "data" / "fixtures" / "model_configs"
+DEFAULT_FIXTURE_DIR = MODEL_FIXTURES_DIR  # package data (llmplan/paths.py)
 FIXTURE_PREFIX = "fixture:"
 MAX_CONFIG_BYTES = 1 * 2**20
 HF_HOST = "huggingface.co"

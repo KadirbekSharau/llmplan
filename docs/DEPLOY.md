@@ -6,11 +6,10 @@ open (docs/FOUNDER_QUESTIONS.md, question 5). Either way the same code and data 
 
 ## What the app needs
 
-- Python 3.11, the locked dependencies (`uv.lock`), and the repository's `data/` directory
-  (GPU and price catalogs, model fixtures, benchmark rows, and the bundled trace samples
-  in `data/traces/samples/`). Catalogs are read relative to the checkout, so the project
-  must be installed editable or run from the checkout (M1_NOTES.md); the Docker image does
-  this.
+- Python 3.11 and the locked dependencies (`uv.lock`). The GPU and price catalogs, model
+  fixtures, benchmark rows and bundled trace samples are package data
+  (`llmplan/data/`, read through `importlib.resources`), so a checkout, the Docker image
+  and `pip install llmplan` all carry them (M8).
 - Resources: 1 vCPU and 1 GB of memory are enough for the fixtures and the bundled
   samples. A plan on a 20,000-row sample takes a few seconds. Uploads are capped at 50 MB
   and simulations at 200,000 requests, which bounds memory per session to a few hundred MB.
@@ -81,6 +80,38 @@ build -t llmplan .`.
    The local disk there is not persistent, so a usage log written there is lost on
    restart; prefer the Docker path if the launch metrics (PLAN.md section 8) matter.
 5. `.streamlit/config.toml` in the repository sets the upload cap and turns telemetry off.
+
+## Publishing to PyPI (one-time setup by the founder)
+
+`pip install llmplan` needs the package on PyPI (docs/FOUNDER_QUESTIONS.md, item 7).
+`.github/workflows/release.yml` runs when a tag `v<version>` is pushed: it checks the tag
+against `pyproject.toml`'s version, builds the sdist and wheel, installs the wheel into a
+clean virtual environment with pip and runs `llmplan fit` and `llmplan gpus` from outside
+the checkout, publishes to PyPI, and creates the GitHub release with that version's
+CHANGELOG section. Until PyPI is configured the publish step is skipped with a notice
+("PyPI publishing is not configured"); everything else still runs.
+
+Trusted publishing (recommended: no token is stored anywhere):
+
+1. Create a PyPI account at https://pypi.org (enable two-factor authentication).
+2. Open https://pypi.org/manage/account/publishing/ and add a **pending publisher**:
+   PyPI project name `llmplan`, owner `KadirbekSharau`, repository name `llmplan`,
+   workflow name `release.yml`, environment name left empty. The first successful upload
+   creates the project under your account.
+3. In the GitHub repository: Settings, Secrets and variables, Actions, Variables: add the
+   repository variable `PYPI_TRUSTED_PUBLISHING` with value `true`. The workflow publishes
+   only when it is set.
+4. Release (the CTO, after review): `git tag v0.2.0 && git push origin v0.2.0`. A tag whose
+   version differs from `pyproject.toml` fails the workflow before anything is built.
+
+Alternative, an API token: create a token on PyPI (scope it to the `llmplan` project once
+the project exists) and add it as the repository secret `PYPI_API_TOKEN`; the workflow uses
+it when present. Optional hardening once the repository is public: create a GitHub
+environment `pypi` with required reviewers, add `environment: pypi` to the `publish` job,
+and enter `pypi` as the environment name of the trusted publisher on PyPI.
+
+Names on PyPI are permanent; the founder confirmed `llmplan` (FOUNDER_QUESTIONS.md,
+item 6).
 
 ## Checks after deploying
 

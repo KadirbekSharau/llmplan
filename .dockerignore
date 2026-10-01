@@ -1,4 +1,4 @@
-# Only pyproject.toml, uv.lock, README.md, llmplan/, data/ and .streamlit/ are needed.
+# Only pyproject.toml, uv.lock, README.md, llmplan/ (with llmplan/data/) and .streamlit/ are needed.
 .git
 .github
 .claude
@@ -18,4 +18,4 @@ Dockerfile
 .dockerignore
 .env
 # Full public traces fetched into the checkout by mistake; the samples are kept.
-data/traces/*.csv
+llmplan/data/traces/*.csv

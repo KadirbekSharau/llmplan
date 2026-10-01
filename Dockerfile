@@ -14,12 +14,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first (cached layer), then the project. The project is installed editable,
-# so catalogs and samples are read from /app/data, as from a checkout (M1_NOTES.md).
+# Dependencies first (cached layer), then the project. Catalogs and samples are package data
+# (llmplan/data, M8), so copying the package is enough.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --locked --no-dev --no-install-project
 COPY llmplan ./llmplan
-COPY data ./data
 COPY .streamlit ./.streamlit
 RUN uv sync --locked --no-dev
 

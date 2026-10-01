@@ -48,7 +48,7 @@ TOY: Scenario = {
     "total_request_rate": 30.0,
 }
 # Buckets on a 2 x 2 grid (inputs <= 500 | > 500 tokens, outputs <= 500 | > 500), each at a
-# request shape the NIM benchmark rows cover (data/benchmarks/): chat 200/200, generation
+# request shape the NIM benchmark rows cover (llmplan/data/benchmarks/): chat 200/200, generation
 # 500/2,000, document 5,000/500, balanced 1,000/1,000 (input/output tokens).
 SHAPES = ((200, 200), (500, 2000), (5000, 500), (1000, 1000))
 MIXES = {

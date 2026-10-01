@@ -6,8 +6,12 @@ with the recorded run in docs/milestones/M8_NOTES.md.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -308,3 +312,33 @@ def test_9_8_unsupported_mla() -> None:
     with pytest.raises(UnsupportedArchitecture, match="MLA") as info:
         load_model("fixture:deepseek-v3")  # architectures: ["DeepseekV3ForCausalLM"]
     assert info.value.field == "architectures"
+
+
+# 9.9 Packaging: the wheel carries the data and runs from outside the checkout.
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.slow
+def test_wheel_smoke(tmp_path: Path) -> None:
+    uv = os.environ.get("UV") or shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is not on PATH")
+    build = subprocess.run(  # noqa: S603  # fixed argv, no shell
+        [uv, "build", "--wheel", "--out-dir", str(tmp_path / "dist"), str(ROOT)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stderr[-2000:]
+    (wheel,) = (tmp_path / "dist").glob("llmplan-*.whl")
+    spec = importlib.util.spec_from_file_location(
+        "wheel_smoke", ROOT / "scripts" / "wheel_smoke.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    work = tmp_path / "work"  # pytest's tmp_path is outside the checkout
+    assert not work.resolve().is_relative_to(ROOT)
+    fit_json, gpus_text = module.smoke(wheel, work, installer="uv")
+    assert json.loads(fit_json)["fits"] is True
+    assert "h100-sxm-80gb" in gpus_text

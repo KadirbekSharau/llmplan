@@ -211,7 +211,7 @@ def benchmarks_command(
     ] = None,
     fmt: FormatOpt = "text",
 ) -> None:
-    """List the shipped benchmark rows (data/benchmarks), optionally filtered."""
+    """List the shipped benchmark rows, optionally filtered."""
 
     def produce() -> str:
         if gpu is not None:

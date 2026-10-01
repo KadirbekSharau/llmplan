@@ -219,6 +219,47 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   The live Mixtral and Qwen3-MoE counts equal the fixture values exactly, so the fixtures
   carry the real integers. Llama-3.1-8B is gated and no token is available to this agent;
   its integers equal `fixture:llama3-8b` (8,030,261,248, M1), 0.00% from 8.03B.
+- **Step 6 — Data in the wheel.** `git mv data llmplan/data` (history kept as renames);
+  `llmplan/paths.py` resolves `files("llmplan") / "data"` once and names each location
+  (`GPUS_YAML`, `PRICES_YAML`, `BENCHMARKS_DIR`, `MODEL_FIXTURES_DIR`, `TRACE_MANIFEST`,
+  `TRACE_SAMPLES_DIR`); the five modules that built `Path(__file__).parents[2] / "data"`
+  (hardware, models, benchmarks, fetch, presets) now import from it, and no
+  repository-relative path is left in the package. The resource root must be a real
+  directory (a regular or editable install, or a wheel); a zip import raises
+  `CatalogError`, because `load_workload` and the catalog loaders take filesystem paths.
+  hatchling packs `llmplan/data/**` with the package (the wheel lists all 20 data files,
+  about 0.8 MB compressed); the nested `traces/.gitignore` is excluded. The Dockerfile no
+  longer copies `data/`. Current docs (README, ARCHITECTURE, DEPLOY, LAUNCH, PLAN,
+  DEFINITION_OF_DONE) were updated; milestone records written before M8 still say `data/`,
+  so `data/README.md` is the pointer the design allows.
+- **Step 6 — Version 0.2.0.** `pyproject.toml`, `llmplan.__version__` and `uv.lock`
+  (`uv lock`: only the project's own entry changed) say 0.2.0, so the CTO's `v0.2.0` tag
+  matches; the release workflow refuses a tag that differs from the package version.
+  `tests/unit/test_scaffold.py` asserts the new version.
+- **Step 6 — Install smoke test (8.2, 9.9).** `scripts/wheel_smoke.py WHEEL [--installer
+  pip|uv]` creates a clean virtual environment in a temporary directory, installs the
+  wheel (pip by default, as users do; `uv pip` from uv's cache for the local test), checks
+  that `llmplan` imports from that environment and not the checkout, and runs `llmplan fit
+  --model fixture:llama3-8b --gpu h100-sxm-80gb --format json` and `llmplan gpus` from a
+  directory outside the checkout without `PYTHONPATH`. CI runs it after `uv build` in the
+  `check` job (pip); `tests/acceptance/test_m8.py::test_wheel_smoke` (marked `slow`) builds
+  the wheel into pytest's temporary directory and runs it with uv: passed locally in 97 s,
+  most of it installing the locked dependencies. The pip path (`--installer pip`, what CI
+  runs) also passed locally, in 2 min 48 s, downloading the dependencies from PyPI.
+- **Step 6 — Release workflow (8.3).** `.github/workflows/release.yml` on tags `v*`:
+  `build` (tag equals the package version, `uv build`, the pip smoke test, release notes
+  cut from CHANGELOG.md's `## [<version>]` section, artifact), `publish` (OIDC
+  `id-token: write`; publishes with `pypa/gh-action-pypi-publish@release/v1` only when the
+  repository variable `PYPI_TRUSTED_PUBLISHING` is `true` or the secret `PYPI_API_TOKEN`
+  exists, otherwise a `::notice::` and the step is skipped, so the job succeeds), and
+  `github-release` (`gh release create` with the wheel, sdist and notes). A workflow cannot
+  detect a PyPI trusted publisher before trying to upload, so the founder flips the
+  variable after the one-time setup documented in docs/DEPLOY.md ("Publishing to PyPI").
+  The publish job references no GitHub environment: environments are unavailable in
+  private repositories on the free plan, and the tag comes before the repository is made
+  public. Both workflows pass `actionlint` 1.7.12 (installed with `uv tool run --from
+  actionlint-py`; shellcheck is not installed here, so embedded shell was not linted) and
+  parse with `yaml.safe_load`; the notes `awk` was exercised on a sample changelog.
 
 ## Deviations from the design doc
 

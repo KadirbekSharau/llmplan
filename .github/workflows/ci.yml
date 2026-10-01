@@ -37,6 +37,8 @@ jobs:
         run: uv audit
       - name: Build
         run: uv build
+      - name: Install smoke test (clean venv, pip, outside the checkout)
+        run: uv run --no-project python scripts/wheel_smoke.py dist/*.whl --installer pip
       - name: CLI entry point
         run: uv run llmplan --help
 

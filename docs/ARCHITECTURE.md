@@ -48,7 +48,7 @@ small, readable, and safe.
   the environment (`HF_TOKEN`), never from a file we write, never logged.
 - Uploaded traces are size-capped (50 MB in the web UI, checked before parsing; never written to disk), parsed with an explicit column schema,
   and never executed or templated.
-- No secrets in the repo. `data/` contains only public catalog data with source URLs.
+- No secrets in the repo. `llmplan/data/` contains only public catalog data with source URLs.
 - Dependencies pinned in `uv.lock`; `pip-audit` (or `uv audit`) runs in CI.
 - Logging never includes tokens, file contents, or full user traces; log shapes and counts.
 
@@ -68,8 +68,8 @@ small, readable, and safe.
 
 ```
                     +-------------------+      +----------------------+
-  HF config.json -->|  catalog.models   |      |  catalog.hardware    |<-- data/gpus.yaml
-  (or fixture)      |  ModelSpec        |      |  GPUSpec, PriceRow   |<-- data/prices.yaml
+  HF config.json -->|  catalog.models   |      |  catalog.hardware    |<-- gpus.yaml
+  (or fixture)      |  ModelSpec        |      |  GPUSpec, PriceRow   |<-- prices.yaml
                     +---------+---------+      +----------+-----------+
                               |                           |
                               v                           v
@@ -108,6 +108,7 @@ There is no shared mutable state and no database in v1.
 llmplan/
   __init__.py            # version only
   errors.py              # exception hierarchy (section 7)
+  paths.py               # M8: package data paths via importlib.resources (no repo fallback)
   types.py               # shared Literal aliases: DType, KVDType, Attention, Commitment
   catalog/
     models.py            # ModelSpec + loaders (HF fetch behind protocol, fixtures)
@@ -194,14 +195,15 @@ llmplan/
     presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits
     usage_log.py         # opt-in JSON-lines usage log (LLMPLAN_USAGE_LOG)
     calibrate.py         # M8: "Calibrate with your own benchmarks" sidebar and report
-data/
-  gpus.yaml
-  prices.yaml
-  benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
-  fixtures/model_configs/*.json
-  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (full data files never committed)
-  traces/samples/        # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
-scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py
+  data/                  # package data, shipped in the wheel (M8; was data/ at the repo root)
+    gpus.yaml
+    prices.yaml
+    benchmarks/          # M3: <gpu-id>.yaml rows, aliases.yaml
+    fixtures/model_configs/*.json
+    traces/manifest.yaml # M2: public trace URLs + SHA-256 (full data files never committed)
+    traces/samples/      # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
+scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py;
+                         #   M8: wheel_smoke.py (install test), check_secrets.py (history scan)
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -662,7 +664,7 @@ class ClassComparison(BaseModel, frozen=True):
 # llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
 class SamplePreset(BaseModel, frozen=True):
     key: str; label: str
-    filename: str                        # under data/traces/samples/, generic csv
+    filename: str                        # under llmplan/data/traces/samples/, generic csv
     rows: int                            # gt=0
     source_url: str
 class SyntheticPreset(BaseModel, frozen=True):
@@ -735,18 +737,22 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
 
 ## 8. Configuration and data files
 
-- `data/gpus.yaml`: list of `GPUSpec`. `data/prices.yaml`: list of `PriceRow`. Both validated
+All shipped data lives under `llmplan/data/` and is resolved by `llmplan/paths.py` with
+`importlib.resources`, so a checkout, an editable install and an installed wheel read the
+same files (M8). Paths below are relative to `llmplan/data/`.
+
+- `gpus.yaml`: list of `GPUSpec`. `prices.yaml`: list of `PriceRow`. Both validated
   on load; a bad row fails the whole load with the row index and field.
 - Users may pass `--gpus`/`--prices` to override with their own files (same schema).
   `llmplan plan` uses `--gpus` for a list of GPU ids (M4_DESIGN.md section 9), so its catalog
   overrides are `--gpu-catalog PATH` and `--prices PATH`.
-- `data/benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `data/benchmarks/aliases.yaml`:
+- `benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `benchmarks/aliases.yaml`:
   mapping of model id -> canonical id. Every row must resolve to a model fixture (directly or
   through an alias) and pass the physical floor (roofline at 100% bandwidth and MFU), or the
   whole load fails with `BenchmarkError` naming the file, row index, and model id.
-- Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
+- Fixtures in `fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
-- `data/traces/manifest.yaml` (M2): list of `TraceSource` rows
+- `traces/manifest.yaml` (M2): list of `TraceSource` rows
   (`llmplan.workload.fetch`: `name`, `url | None`, `sha256 | None`, `size_bytes | None`,
   `as_of`, `license_url`). `llmplan traces fetch` downloads only with `--yes`, caps at
   2 GiB, verifies the SHA-256, and never writes into the repo unless `--dest` points there.

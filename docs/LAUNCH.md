@@ -21,7 +21,7 @@ decisions (docs/FOUNDER_QUESTIONS.md, questions 5 and 6, working name "llmplan")
       inputs, scrolled so the answer card, the fleet table, one `vllm serve` line and the
       top of the timeline are visible (1600 px wide, light theme). Attach it to each post.
 - [ ] Price catalog date checked: the app shows the `as_of` of the shipped prices; refresh
-      `data/prices.yaml` first if it is more than a month old.
+      `llmplan/data/prices.yaml` first if it is more than a month old.
 - [ ] Someone is available to answer comments for the first 24 hours.
 
 ## Show HN

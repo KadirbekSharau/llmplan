@@ -17,11 +17,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.errors import CatalogError
+from llmplan.paths import GPUS_YAML, PRICES_YAML
 from llmplan.types import Commitment
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-DEFAULT_GPUS_PATH = DATA_DIR / "gpus.yaml"
-DEFAULT_PRICES_PATH = DATA_DIR / "prices.yaml"
+DEFAULT_GPUS_PATH = GPUS_YAML  # package data (llmplan/paths.py)
+DEFAULT_PRICES_PATH = PRICES_YAML
 
 _ID = r"^[a-z0-9][a-z0-9._-]*$"
 _URL = r"^https://\S+$"
@@ -89,7 +89,8 @@ def _validate(model: type[_Row], row: dict[str, Any], where: str) -> _Row:
 
 
 def load_gpus(path: Path | None = None) -> Mapping[str, GPUSpec]:
-    """Load the GPU catalog (default `data/gpus.yaml`) as a read-only mapping keyed by id.
+    """Load the GPU catalog (default: the shipped `gpus.yaml`) as a read-only mapping keyed
+    by id.
 
     Raises `CatalogError` naming the file, row index, and field for any invalid row, and for
     duplicate ids.
@@ -107,7 +108,7 @@ def load_gpus(path: Path | None = None) -> Mapping[str, GPUSpec]:
 def load_prices(
     path: Path | None = None, *, gpus: Mapping[str, GPUSpec] | None = None
 ) -> tuple[PriceRow, ...]:
-    """Load the price catalog (default `data/prices.yaml`).
+    """Load the price catalog (default: the shipped `prices.yaml`).
 
     Every row's `gpu_id` must exist in `gpus` (default: the shipped GPU catalog); otherwise
     `CatalogError` names the row index and the unknown id.

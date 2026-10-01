@@ -45,7 +45,7 @@ Format = Literal["text", "json"]
 ModelOpt = Annotated[str, typer.Option("--model", help="HF repo id (org/name) or fixture:<name>.")]
 FormatOpt = Annotated[Format, typer.Option("--format", help="Output format.")]
 GpusOpt = Annotated[
-    Path | None, typer.Option("--gpus", help="GPU catalog YAML (default: data/gpus.yaml).")
+    Path | None, typer.Option("--gpus", help="GPU catalog YAML (default: the shipped one).")
 ]
 
 

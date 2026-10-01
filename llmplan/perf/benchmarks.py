@@ -1,7 +1,7 @@
 """Benchmark table: row schema, YAML loader, and load-time validation (M3_DESIGN.md 5.1-5.2).
 
-`data/benchmarks/<gpu-id>.yaml` files hold lists of published measurements;
-`data/benchmarks/aliases.yaml` maps model ids (fixtures, renamed repos) to the canonical id
+`<gpu-id>.yaml` files under the shipped `benchmarks/` data directory hold lists of published
+measurements; `aliases.yaml` there maps model ids (fixtures, renamed repos) to the canonical id
 rows are recorded under. Every row is checked against the GPU catalog, a model fixture, and
 the physical floor of the roofline model before it can be used.
 """
@@ -18,11 +18,12 @@ import pydantic
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from llmplan.catalog.hardware import DATA_DIR, GPUSpec, load_gpus
+from llmplan.catalog.hardware import GPUSpec, load_gpus
 from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
 from llmplan.errors import BenchmarkError, CatalogError
 from llmplan.memory.kv_cache import kv_bytes_per_token_per_gpu
 from llmplan.memory.weights import per_gpu_weight_bytes
+from llmplan.paths import BENCHMARKS_DIR
 from llmplan.perf.roofline import (
     active_param_count,
     decode_compute_s,
@@ -32,7 +33,7 @@ from llmplan.perf.roofline import (
 )
 from llmplan.types import DType
 
-DEFAULT_BENCHMARKS_DIR = DATA_DIR / "benchmarks"
+DEFAULT_BENCHMARKS_DIR = BENCHMARKS_DIR  # package data (llmplan/paths.py)
 ALIASES_FILE = "aliases.yaml"
 USER_UPLOAD = "user-upload"  # M8: source_url of a row uploaded for one session
 
@@ -206,7 +207,7 @@ def _check_row(
 def load_benchmarks(
     directory: Path | None = None, *, gpus: Mapping[str, GPUSpec] | None = None
 ) -> BenchmarkTable:
-    """Load and validate every `<gpu-id>.yaml` in `directory` (default `data/benchmarks`).
+    """Load and validate every `<gpu-id>.yaml` in `directory` (default: the shipped table).
 
     `gpus` is the FK target (default: the shipped GPU catalog). Raises `BenchmarkError`
     naming the file, row index, and `model_id` for a malformed row, an unknown GPU or

@@ -22,7 +22,8 @@ Implementing agents: start with PLAN.md, then ARCHITECTURE.md, then your milesto
 
 ## Usage
 
-From a checkout (catalogs and fixtures are read from `data/`):
+From a checkout (catalogs, fixtures and trace samples ship inside the package, under
+`llmplan/data/`):
 
 ```
 uv sync
@@ -46,7 +47,7 @@ Options: `--port 8501`, `--address localhost` (`0.0.0.0` in a container), `--hea
 gated models, and `LLMPLAN_USAGE_LOG=PATH` enables the anonymous usage log (fields listed in
 the page footer and docs/DEPLOY.md). Limits: 50 MB uploads (refused before parsing), a 30 s
 solver time limit, 200,000 simulated requests, 30 plans per hour per session. The presets
-are samples of the Azure 2023/2024 and BurstGPT traces in `data/traces/samples/` (CC-BY-4.0;
+are samples of the Azure 2023/2024 and BurstGPT traces in `llmplan/data/traces/samples/` (CC-BY-4.0;
 see its README). Docker: `docker build -t llmplan . && docker run --rm -p 8501:8501
 llmplan`; hosting steps in docs/DEPLOY.md.
 
@@ -69,7 +70,7 @@ and weight size in every dtype.
 uv run llmplan model-info --model fixture:qwen2.5-7b
 ```
 
-**`llmplan gpus`** — the GPU catalog (`data/gpus.yaml`, or `--gpus PATH`).
+**`llmplan gpus`** — the GPU catalog (`llmplan/data/gpus.yaml`, or `--gpus PATH`).
 
 ```
 uv run llmplan gpus --format json
@@ -98,7 +99,7 @@ uv run llmplan workload synth --rps 5 --duration 3600 --in-tokens lognormal:6.2:
 Token distributions: `fixed:N`, `lognormal:MEAN:SIGMA[:LO:HI]` (parameters of the underlying
 normal), `uniform:LO:HI`.
 
-**`llmplan traces fetch`** — download a public trace listed in `data/traces/manifest.yaml`
+**`llmplan traces fetch`** — download a public trace listed in `llmplan/data/traces/manifest.yaml`
 (`azure2023-code`, `azure2023-conv`, `azure2024-code`, `azure2024-conv`, `burstgpt-1`). It
 refuses to run without `--yes`, verifies the recorded SHA-256, and caps downloads at 2 GiB.
 
@@ -108,7 +109,7 @@ uv run llmplan traces fetch azure2023-conv --dest ~/traces --yes
 
 **`llmplan perf estimate`** — throughput, TTFT, and TPOT of one replica under a workload's
 token distribution. `--backend auto` (default) interpolates published benchmark rows
-(`data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request
+(`llmplan/data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request
 shape, and otherwise falls back to a roofline bound; the output states the backend,
 confidence (`measured`, `interpolated`, or `roofline`), assumptions, and sources.
 
@@ -124,7 +125,7 @@ does (`uv run llmplan perf estimate --model fixture:llama3-8b --gpu l40s-48gb --
 tests/fixtures/workload_10.csv`). Latencies are service times without queueing.
 
 **`llmplan perf benchmarks`** — the shipped benchmark rows, optionally filtered by GPU and
-model (fixture ids match through `data/benchmarks/aliases.yaml`).
+model (fixture ids match through `llmplan/data/benchmarks/aliases.yaml`).
 
 ```
 uv run llmplan perf benchmarks --gpu h100-sxm-80gb --model fixture:llama3-8b
@@ -160,7 +161,7 @@ adds a class table and a routing table (the share of each class's requests per r
 type):
 
 ```
-uv run llmplan plan --model fixture:llama3-8b --trace data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
+uv run llmplan plan --model fixture:llama3-8b --trace llmplan/data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
 ```
 
 **`llmplan simulate`** — replay a trace on a planned fleet and show what it does over time:

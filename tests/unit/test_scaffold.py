@@ -5,7 +5,7 @@ from llmplan import errors
 
 
 def test_version_is_set() -> None:
-    assert llmplan.__version__ == "0.1.0"
+    assert llmplan.__version__ == "0.2.0"
 
 
 def test_error_hierarchy() -> None:

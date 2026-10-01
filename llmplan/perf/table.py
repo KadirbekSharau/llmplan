@@ -221,7 +221,7 @@ def _from_rows(
 class TableBackend:
     """Interpolates published benchmark rows; `None` when no row matches closely enough.
 
-    `table` defaults to the shipped, validated `data/benchmarks` table (loaded on first use).
+    `table` defaults to the shipped, validated benchmark table (loaded on first use).
     Confidence is `"measured"` on an exact concurrency hit, `"interpolated"` otherwise.
     """
 

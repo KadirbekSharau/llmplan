@@ -121,7 +121,8 @@ follow-on and is one more adapter, not a rewrite.
 - Python 3.11+, `uv` for environments, `pyproject.toml` with `hatchling` build.
 - `ruff` (lint + format), `pytest`, `mypy --strict` on `llmplan/` (allow `# type: ignore`
   only with a comment).
-- Layout: `llmplan/` package, `tests/`, `data/` (catalogs, fixtures), `docs/`.
+- Layout: `llmplan/` package (with `llmplan/data/`: catalogs, fixtures, samples), `tests/`,
+  `docs/`.
 - No network access in unit tests. Hugging Face config fetches are behind an interface with
   a fixture-backed fake.
 - Conventional commits (`feat:`, `fix:`, `test:`, `docs:`).
