@@ -3,6 +3,9 @@
 # Usage: deploy/droplet-redeploy.sh [host]   (default host: 137.184.154.129, user root)
 # Requires: ssh access with the key registered on the Droplet; docker, caddy and the
 # /var/lib/llmplan volume already set up per docs/DEPLOY.md "DigitalOcean Droplet".
+#
+# The remote steps run under setsid with a log file, so a dropped SSH session does not
+# abort the build or leave the old container running. The script then polls the log.
 set -euo pipefail
 HOST="${1:-137.184.154.129}"
 REV="$(git rev-parse --short HEAD)"
@@ -10,21 +13,16 @@ TMP="$(mktemp -t llmplan-src.XXXXXX).tar.gz"
 git archive --format=tar.gz -o "$TMP" HEAD
 scp -q "$TMP" "root@$HOST:/root/llmplan-src.tar.gz"
 rm -f "$TMP"
-ssh "root@$HOST" bash -s "$REV" <<'REMOTE'
-set -euo pipefail
-REV="$1"
-cd /opt/llmplan && rm -rf src && mkdir src && tar -xzf /root/llmplan-src.tar.gz -C src
-docker build -q -t "llmplan:$REV" -t llmplan:main src >/dev/null
-docker rm -f llmplan >/dev/null 2>&1 || true
-docker run -d --name llmplan --restart unless-stopped --memory 512m \
-  -p 127.0.0.1:8501:8501 \
-  -e LLMPLAN_USAGE_LOG=/var/lib/llmplan/usage.jsonl \
-  -v /var/lib/llmplan:/var/lib/llmplan \
-  llmplan:main >/dev/null
-for i in $(seq 1 30); do
-  curl -sf http://127.0.0.1:8501/_stcore/health >/dev/null && { echo "healthy: llmplan:$REV"; exit 0; }
-  sleep 2
+scp -q "$(dirname "$0")/droplet-remote.sh" "root@$HOST:/opt/llmplan/remote.sh"
+ssh "root@$HOST" "chmod +x /opt/llmplan/remote.sh && rm -f /root/deploy.log && setsid nohup /opt/llmplan/remote.sh $REV > /root/deploy.log 2>&1 < /dev/null & disown; echo started"
+# Poll the remote log until it reports DONE or FAILED.
+for _ in $(seq 1 120); do
+  status="$(ssh "root@$HOST" "grep -o -E '^(DONE|FAILED).*' /root/deploy.log 2>/dev/null | tail -1 || true")"
+  if [ -n "$status" ]; then
+    ssh "root@$HOST" "tail -20 /root/deploy.log"
+    [[ "$status" == DONE* ]] && exit 0 || exit 1
+  fi
+  sleep 10
 done
-echo "container did not become healthy; docker logs llmplan:" >&2; docker logs --tail 50 llmplan >&2; exit 1
-REMOTE
-docker image prune -f >/dev/null 2>&1 || true
+echo "timed out waiting for the remote deploy; see /root/deploy.log on $HOST" >&2
+exit 1
