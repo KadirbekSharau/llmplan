@@ -1,0 +1,527 @@
+{
+  "fleet": [
+    {
+      "price_row": {
+        "provider": "aws",
+        "instance": "g6.xlarge",
+        "gpu_id": "l4-24gb",
+        "gpu_count": 1,
+        "price_usd_per_hour": 0.8048,
+        "commitment": "on_demand",
+        "region": "us-east-1",
+        "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+        "as_of": "2026-09-30"
+      },
+      "instances": 1,
+      "usd_per_day": 19.315199999999997
+    }
+  ],
+  "replicas": [
+    {
+      "candidate": {
+        "price_row": {
+          "provider": "aws",
+          "instance": "g6.xlarge",
+          "gpu_id": "l4-24gb",
+          "gpu_count": 1,
+          "price_usd_per_hour": 0.8048,
+          "commitment": "on_demand",
+          "region": "us-east-1",
+          "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+          "as_of": "2026-09-30"
+        },
+        "config": {
+          "tensor_parallel": 1,
+          "dtype": "fp8",
+          "kv_dtype": "bf16",
+          "max_num_seqs": 128,
+          "max_model_len": 8192,
+          "gpu_memory_utilization": 0.9,
+          "max_num_batched_tokens": 8192
+        },
+        "replicas_per_instance": 1,
+        "fit": {
+          "fits": true,
+          "per_gpu_usable_bytes": 21737609625,
+          "per_gpu_weight_bytes": 8030261248,
+          "per_gpu_overhead_bytes": 2147483648,
+          "per_gpu_kv_budget_bytes": 11559864729,
+          "kv_bytes_per_token_per_gpu": 131072,
+          "kv_token_capacity": 88194,
+          "max_concurrent_seqs_at_context": 10,
+          "binding": "ok",
+          "notes": [
+            "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+          ],
+          "confidence": "exact"
+        },
+        "perf": {
+          "backend": "roofline",
+          "confidence": "roofline",
+          "effective_batch": 128,
+          "decode_tokens_per_s": 1517.0067728428855,
+          "prefill_tokens_per_s": 7534.001464157595,
+          "requests_per_s_capacity": 27.154773982605292,
+          "ttft_ms_p50": 73.00237498181818,
+          "ttft_ms_p95": 126.75866928661156,
+          "tpot_ms_p50": 84.37668327619048,
+          "tpot_ms_p95": 126.56502491428571,
+          "assumptions": [
+            "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+            "effective batch 128: min(max_num_seqs 128, KV capacity 152 sequences at 577.5 mean context tokens)",
+            "decode is memory-bound: memory 84.377 ms, compute 28.316 ms per step",
+            "latencies are service times; queueing is not modeled"
+          ],
+          "source_urls": []
+        },
+        "status": "eligible",
+        "reason": "eligible: 1 replica(s) per instance, 21.72 req/s and 1,213.61 output tokens/s each (derated), perf roofline/roofline",
+        "usd_per_hour_per_rps": 0.03704689277268225
+      },
+      "count": 1,
+      "instances": 1
+    }
+  ],
+  "cost_usd_per_day": 19.315199999999997,
+  "baseline": {
+    "fleet": [
+      {
+        "price_row": {
+          "provider": "aws",
+          "instance": "g6.xlarge",
+          "gpu_id": "l4-24gb",
+          "gpu_count": 1,
+          "price_usd_per_hour": 0.8048,
+          "commitment": "on_demand",
+          "region": "us-east-1",
+          "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+          "as_of": "2026-09-30"
+        },
+        "instances": 1,
+        "usd_per_day": 19.315199999999997
+      }
+    ],
+    "replicas": [
+      {
+        "candidate": {
+          "price_row": {
+            "provider": "aws",
+            "instance": "g6.xlarge",
+            "gpu_id": "l4-24gb",
+            "gpu_count": 1,
+            "price_usd_per_hour": 0.8048,
+            "commitment": "on_demand",
+            "region": "us-east-1",
+            "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+            "as_of": "2026-09-30"
+          },
+          "config": {
+            "tensor_parallel": 1,
+            "dtype": "fp8",
+            "kv_dtype": "bf16",
+            "max_num_seqs": 64,
+            "max_model_len": 8192,
+            "gpu_memory_utilization": 0.9,
+            "max_num_batched_tokens": 8192
+          },
+          "replicas_per_instance": 1,
+          "fit": {
+            "fits": true,
+            "per_gpu_usable_bytes": 21737609625,
+            "per_gpu_weight_bytes": 8030261248,
+            "per_gpu_overhead_bytes": 2147483648,
+            "per_gpu_kv_budget_bytes": 11559864729,
+            "kv_bytes_per_token_per_gpu": 131072,
+            "kv_token_capacity": 88194,
+            "max_concurrent_seqs_at_context": 10,
+            "binding": "ok",
+            "notes": [
+              "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+            ],
+            "confidence": "exact"
+          },
+          "perf": {
+            "backend": "roofline",
+            "confidence": "roofline",
+            "effective_batch": 64,
+            "decode_tokens_per_s": 1043.9092488530123,
+            "prefill_tokens_per_s": 7534.001464157595,
+            "requests_per_s_capacity": 18.577956177994498,
+            "ttft_ms_p50": 73.00237498181818,
+            "ttft_ms_p95": 126.75866928661156,
+            "tpot_ms_p50": 61.30801127619048,
+            "tpot_ms_p95": 91.96201691428571,
+            "assumptions": [
+              "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+              "effective batch 64: min(max_num_seqs 64, KV capacity 152 sequences at 577.5 mean context tokens)",
+              "decode is memory-bound: memory 61.308 ms, compute 14.158 ms per step",
+              "latencies are service times; queueing is not modeled"
+            ],
+            "source_urls": []
+          },
+          "status": "eligible",
+          "reason": "eligible: 1 replica(s) per instance, 14.86 req/s and 835.13 output tokens/s each (derated), perf roofline/roofline",
+          "usd_per_hour_per_rps": 0.0541501977053645
+        },
+        "count": 1,
+        "instances": 1
+      }
+    ],
+    "cost_usd_per_day": 19.315199999999997,
+    "baseline": null,
+    "baseline_saving_pct": null,
+    "demand_rps": 0.1,
+    "demand_output_tokens_per_s": 5.666666666666667,
+    "capacity_rps": 14.8623649423956,
+    "capacity_output_tokens_per_s": 835.1273990824099,
+    "binding": "tokens",
+    "candidates": [],
+    "solver": {
+      "backend": "enumeration",
+      "status": "optimal",
+      "objective_usd_per_day": 19.315199999999997,
+      "best_bound_usd_per_day": 19.315199999999997,
+      "n_variables": 0,
+      "n_constraints": 0
+    },
+    "assumptions": [
+      "baseline: best fleet of one price row and one replica configuration, by enumeration; candidates are listed on the main result",
+      "capacity derated to 0.8 x the estimated throughput (utilization_target)",
+      "GPUs left idle on a paid instance are paid for (leftover-GPU waste)",
+      "sized for the peak 60 s window (0.1 req/s, 5.66667 output tokens/s); no autoscaling in M4",
+      "TTFT and TPOT are p95 service-time estimates without queueing (queueing is M5)",
+      "perf confidence of chosen replicas: aws g6.xlarge tp1 fp8 seqs64: roofline/roofline"
+    ]
+  },
+  "baseline_saving_pct": 0.0,
+  "demand_rps": 0.1,
+  "demand_output_tokens_per_s": 5.666666666666667,
+  "capacity_rps": 21.723819186084235,
+  "capacity_output_tokens_per_s": 1213.6054182743085,
+  "binding": "tokens",
+  "candidates": [
+    {
+      "price_row": {
+        "provider": "aws",
+        "instance": "g6e.xlarge",
+        "gpu_id": "l40s-48gb",
+        "gpu_count": 1,
+        "price_usd_per_hour": 1.861,
+        "commitment": "on_demand",
+        "region": "us-east-1",
+        "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+        "as_of": "2026-09-30"
+      },
+      "config": {
+        "tensor_parallel": 1,
+        "dtype": "fp8",
+        "kv_dtype": "bf16",
+        "max_num_seqs": 128,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "max_num_batched_tokens": 8192
+      },
+      "replicas_per_instance": 1,
+      "fit": {
+        "fits": true,
+        "per_gpu_usable_bytes": 43475219251,
+        "per_gpu_weight_bytes": 8030261248,
+        "per_gpu_overhead_bytes": 2147483648,
+        "per_gpu_kv_budget_bytes": 33297474355,
+        "kv_bytes_per_token_per_gpu": 131072,
+        "kv_token_capacity": 254039,
+        "max_concurrent_seqs_at_context": 31,
+        "binding": "ok",
+        "notes": [
+          "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+        ],
+        "confidence": "exact"
+      },
+      "perf": {
+        "backend": "roofline",
+        "confidence": "roofline",
+        "effective_batch": 128,
+        "decode_tokens_per_s": 4368.979505787511,
+        "prefill_tokens_per_s": 22819.930054659162,
+        "requests_per_s_capacity": 78.26534595053724,
+        "ttft_ms_p50": 24.10173907994543,
+        "ttft_ms_p95": 41.84938331154161,
+        "tpot_ms_p50": 29.29745947089947,
+        "tpot_ms_p95": 43.9461892063492,
+        "assumptions": [
+          "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+          "effective batch 128: min(max_num_seqs 128, KV capacity 439 sequences at 577.5 mean context tokens)",
+          "decode is memory-bound: memory 29.297 ms, compute 9.349 ms per step",
+          "latencies are service times; queueing is not modeled"
+        ],
+        "source_urls": []
+      },
+      "status": "eligible",
+      "reason": "eligible: 1 replica(s) per instance, 62.61 req/s and 3,495.18 output tokens/s each (derated), perf roofline/roofline",
+      "usd_per_hour_per_rps": 0.029722605474332944
+    },
+    {
+      "price_row": {
+        "provider": "aws",
+        "instance": "g6.xlarge",
+        "gpu_id": "l4-24gb",
+        "gpu_count": 1,
+        "price_usd_per_hour": 0.8048,
+        "commitment": "on_demand",
+        "region": "us-east-1",
+        "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+        "as_of": "2026-09-30"
+      },
+      "config": {
+        "tensor_parallel": 1,
+        "dtype": "fp8",
+        "kv_dtype": "bf16",
+        "max_num_seqs": 128,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "max_num_batched_tokens": 8192
+      },
+      "replicas_per_instance": 1,
+      "fit": {
+        "fits": true,
+        "per_gpu_usable_bytes": 21737609625,
+        "per_gpu_weight_bytes": 8030261248,
+        "per_gpu_overhead_bytes": 2147483648,
+        "per_gpu_kv_budget_bytes": 11559864729,
+        "kv_bytes_per_token_per_gpu": 131072,
+        "kv_token_capacity": 88194,
+        "max_concurrent_seqs_at_context": 10,
+        "binding": "ok",
+        "notes": [
+          "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+        ],
+        "confidence": "exact"
+      },
+      "perf": {
+        "backend": "roofline",
+        "confidence": "roofline",
+        "effective_batch": 128,
+        "decode_tokens_per_s": 1517.0067728428855,
+        "prefill_tokens_per_s": 7534.001464157595,
+        "requests_per_s_capacity": 27.154773982605292,
+        "ttft_ms_p50": 73.00237498181818,
+        "ttft_ms_p95": 126.75866928661156,
+        "tpot_ms_p50": 84.37668327619048,
+        "tpot_ms_p95": 126.56502491428571,
+        "assumptions": [
+          "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+          "effective batch 128: min(max_num_seqs 128, KV capacity 152 sequences at 577.5 mean context tokens)",
+          "decode is memory-bound: memory 84.377 ms, compute 28.316 ms per step",
+          "latencies are service times; queueing is not modeled"
+        ],
+        "source_urls": []
+      },
+      "status": "eligible",
+      "reason": "eligible: 1 replica(s) per instance, 21.72 req/s and 1,213.61 output tokens/s each (derated), perf roofline/roofline",
+      "usd_per_hour_per_rps": 0.03704689277268225
+    },
+    {
+      "price_row": {
+        "provider": "aws",
+        "instance": "g6e.xlarge",
+        "gpu_id": "l40s-48gb",
+        "gpu_count": 1,
+        "price_usd_per_hour": 1.861,
+        "commitment": "on_demand",
+        "region": "us-east-1",
+        "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+        "as_of": "2026-09-30"
+      },
+      "config": {
+        "tensor_parallel": 1,
+        "dtype": "fp8",
+        "kv_dtype": "bf16",
+        "max_num_seqs": 64,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "max_num_batched_tokens": 8192
+      },
+      "replicas_per_instance": 1,
+      "fit": {
+        "fits": true,
+        "per_gpu_usable_bytes": 43475219251,
+        "per_gpu_weight_bytes": 8030261248,
+        "per_gpu_overhead_bytes": 2147483648,
+        "per_gpu_kv_budget_bytes": 33297474355,
+        "kv_bytes_per_token_per_gpu": 131072,
+        "kv_token_capacity": 254039,
+        "max_concurrent_seqs_at_context": 31,
+        "binding": "ok",
+        "notes": [
+          "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+        ],
+        "confidence": "exact"
+      },
+      "perf": {
+        "backend": "roofline",
+        "confidence": "roofline",
+        "effective_batch": 64,
+        "decode_tokens_per_s": 3006.458636696675,
+        "prefill_tokens_per_s": 22819.930054659162,
+        "requests_per_s_capacity": 53.56031953840428,
+        "ttft_ms_p50": 24.10173907994543,
+        "ttft_ms_p95": 41.84938331154161,
+        "tpot_ms_p50": 21.287503915343915,
+        "tpot_ms_p95": 31.93125587301587,
+        "assumptions": [
+          "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+          "effective batch 64: min(max_num_seqs 64, KV capacity 439 sequences at 577.5 mean context tokens)",
+          "decode is memory-bound: memory 21.288 ms, compute 4.674 ms per step",
+          "latencies are service times; queueing is not modeled"
+        ],
+        "source_urls": []
+      },
+      "status": "eligible",
+      "reason": "eligible: 1 replica(s) per instance, 42.85 req/s and 2,405.17 output tokens/s each (derated), perf roofline/roofline",
+      "usd_per_hour_per_rps": 0.043432339837554776
+    },
+    {
+      "price_row": {
+        "provider": "aws",
+        "instance": "g6.xlarge",
+        "gpu_id": "l4-24gb",
+        "gpu_count": 1,
+        "price_usd_per_hour": 0.8048,
+        "commitment": "on_demand",
+        "region": "us-east-1",
+        "source_url": "https://aws.amazon.com/ec2/pricing/on-demand/",
+        "as_of": "2026-09-30"
+      },
+      "config": {
+        "tensor_parallel": 1,
+        "dtype": "fp8",
+        "kv_dtype": "bf16",
+        "max_num_seqs": 64,
+        "max_model_len": 8192,
+        "gpu_memory_utilization": 0.9,
+        "max_num_batched_tokens": 8192
+      },
+      "replicas_per_instance": 1,
+      "fit": {
+        "fits": true,
+        "per_gpu_usable_bytes": 21737609625,
+        "per_gpu_weight_bytes": 8030261248,
+        "per_gpu_overhead_bytes": 2147483648,
+        "per_gpu_kv_budget_bytes": 11559864729,
+        "kv_bytes_per_token_per_gpu": 131072,
+        "kv_token_capacity": 88194,
+        "max_concurrent_seqs_at_context": 10,
+        "binding": "ok",
+        "notes": [
+          "overhead model: 1 GiB fixed + activations(max_num_batched_tokens x hidden x 2 B x 16)"
+        ],
+        "confidence": "exact"
+      },
+      "perf": {
+        "backend": "roofline",
+        "confidence": "roofline",
+        "effective_batch": 64,
+        "decode_tokens_per_s": 1043.9092488530123,
+        "prefill_tokens_per_s": 7534.001464157595,
+        "requests_per_s_capacity": 18.577956177994498,
+        "ttft_ms_p50": 73.00237498181818,
+        "ttft_ms_p95": 126.75866928661156,
+        "tpot_ms_p50": 61.30801127619048,
+        "tpot_ms_p95": 91.96201691428571,
+        "assumptions": [
+          "roofline constants: bandwidth efficiency 0.7, decode MFU 0.3, prefill MFU 0.5, p95 TPOT = p50 x 1.5",
+          "effective batch 64: min(max_num_seqs 64, KV capacity 152 sequences at 577.5 mean context tokens)",
+          "decode is memory-bound: memory 61.308 ms, compute 14.158 ms per step",
+          "latencies are service times; queueing is not modeled"
+        ],
+        "source_urls": []
+      },
+      "status": "eligible",
+      "reason": "eligible: 1 replica(s) per instance, 14.86 req/s and 835.13 output tokens/s each (derated), perf roofline/roofline",
+      "usd_per_hour_per_rps": 0.0541501977053645
+    }
+  ],
+  "solver": {
+    "backend": "highs",
+    "status": "optimal",
+    "objective_usd_per_day": 19.315199999999997,
+    "best_bound_usd_per_day": 19.315199999999997,
+    "n_variables": 4,
+    "n_constraints": 4
+  },
+  "assumptions": [
+    "capacity derated to 0.8 x the estimated throughput (utilization_target)",
+    "GPUs left idle on a paid instance are paid for (leftover-GPU waste)",
+    "sized for the peak 60 s window (0.1 req/s, 5.66667 output tokens/s); no autoscaling in M4",
+    "TTFT and TPOT are p95 service-time estimates without queueing (queueing is M5)",
+    "perf confidence of chosen replicas: aws g6.xlarge tp1 fp8 seqs128: roofline/roofline",
+    "dominance pruning removed 2 of 4 eligible candidates",
+    "binding from the LP relaxation over the chosen candidates: request demand slack (shadow price $0/day per req/s), token demand tight (shadow price $0.01592/day per output token/s)",
+    "headroom of the whole-instance fleet over demand: requests +21623.8%, tokens +21316.6%"
+  ],
+  "request": {
+    "model": "fixture:llama3-8b",
+    "slo": {
+      "ttft_ms_p95": 500.0,
+      "tpot_ms_p95": null,
+      "utilization_target": 0.8
+    },
+    "engine": {
+      "engine": "vllm",
+      "gpu_memory_utilization": 0.9,
+      "max_num_batched_tokens": 8192,
+      "fixed_overhead_bytes": 1073741824,
+      "activation_multiplier": 16.0,
+      "kv_dtype": "bf16"
+    },
+    "options": {
+      "gpu_ids": [
+        "l4-24gb",
+        "l40s-48gb"
+      ],
+      "providers": null,
+      "commitments": [
+        "on_demand"
+      ],
+      "tensor_parallel_choices": [
+        1
+      ],
+      "dtype_choices": [
+        "fp8"
+      ],
+      "max_num_seqs_choices": [
+        64,
+        128
+      ],
+      "max_model_len": 8192,
+      "homogeneous": false,
+      "perf_backend": "auto",
+      "solver": "highs",
+      "time_limit_s": 60.0,
+      "seed": 0,
+      "max_instances_per_row": 1000
+    },
+    "stats": {
+      "n_requests": 10,
+      "duration_s": 90.0,
+      "window_s": 60.0,
+      "n_windows": 2,
+      "mean_rps": 0.1111111111111111,
+      "peak_window_rps": 0.1,
+      "peak_window_index": 0,
+      "input_tokens_p50": 550.0,
+      "input_tokens_p95": 954.9999999999999,
+      "input_tokens_p99": 991.0,
+      "input_tokens_mean": 550.0,
+      "input_tokens_max": 1000,
+      "output_tokens_p50": 55.0,
+      "output_tokens_p95": 95.49999999999999,
+      "output_tokens_p99": 99.1,
+      "output_tokens_mean": 55.0,
+      "output_tokens_max": 100,
+      "peak_input_tokens_per_s": 56.666666666666664,
+      "peak_output_tokens_per_s": 5.666666666666667,
+      "hourly_rps": null
+    }
+  }
+}

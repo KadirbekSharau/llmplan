@@ -1,0 +1,116 @@
+{
+  "plan_cost_usd_per_day": 19.315199999999997,
+  "options": {
+    "window_s": 60.0,
+    "routing": "least_outstanding",
+    "max_requests": 500000,
+    "seed": 0,
+    "ttft_budget_ms": 500.0,
+    "tpot_budget_ms": null
+  },
+  "windows": [
+    {
+      "index": 0,
+      "start_s": 0.0,
+      "arrivals": 38,
+      "completions": 13,
+      "demand_rps": 0.6333333333333333,
+      "capacity_rps": 21.723819186084235,
+      "ttft_ms_p95": 763.6313886279934,
+      "e2e_ms_p95": 32897.242411662126,
+      "ttft_violations": 6,
+      "tpot_violations": 0,
+      "replicas": [
+        {
+          "replica_index": 0,
+          "utilization": 0.10786405929617625,
+          "kv_tokens_in_use_mean": 51904,
+          "kv_tokens_in_use_max": 84763,
+          "kv_bytes_in_use_max": 11110055936,
+          "weight_bytes": 8030261248,
+          "queue_depth_mean": 0.0,
+          "queue_depth_max": 0,
+          "requests_started": 38,
+          "requests_completed": 13,
+          "vram_bytes_total": 24152899584
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "start_s": 60.0,
+      "arrivals": 12,
+      "completions": 33,
+      "demand_rps": 0.2,
+      "capacity_rps": 21.723819186084235,
+      "ttft_ms_p95": 713.9632273221818,
+      "e2e_ms_p95": 75593.6720860756,
+      "ttft_violations": 11,
+      "tpot_violations": 0,
+      "replicas": [
+        {
+          "replica_index": 0,
+          "utilization": 0.13508414199712623,
+          "kv_tokens_in_use_mean": 56907,
+          "kv_tokens_in_use_max": 85229,
+          "kv_bytes_in_use_max": 11171135488,
+          "weight_bytes": 8030261248,
+          "queue_depth_mean": 0.0,
+          "queue_depth_max": 0,
+          "requests_started": 12,
+          "requests_completed": 33,
+          "vram_bytes_total": 24152899584
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "start_s": 120.0,
+      "arrivals": 0,
+      "completions": 4,
+      "demand_rps": 0.0,
+      "capacity_rps": 21.723819186084235,
+      "ttft_ms_p95": 580.7471661394511,
+      "e2e_ms_p95": 70769.49114943852,
+      "ttft_violations": 1,
+      "tpot_violations": 0,
+      "replicas": [
+        {
+          "replica_index": 0,
+          "utilization": 0.004609097822238547,
+          "kv_tokens_in_use_mean": 2134,
+          "kv_tokens_in_use_max": 12511,
+          "kv_bytes_in_use_max": 1639841792,
+          "weight_bytes": 8030261248,
+          "queue_depth_mean": 0.0,
+          "queue_depth_max": 0,
+          "requests_started": 0,
+          "requests_completed": 4,
+          "vram_bytes_total": 24152899584
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "n_requests": 50,
+    "n_truncated": 0,
+    "ttft_ms_p50": 416.84356114618186,
+    "ttft_ms_p95": 756.6762532660892,
+    "tpot_ms_p95": 84.37668327619048,
+    "e2e_ms_p95": 74849.53655567455,
+    "ttft_violation_pct": 36.0,
+    "tpot_violation_pct": 0.0,
+    "mean_utilization": 0.08251909970518033,
+    "max_queue_depth": 0
+  },
+  "assumptions": [
+    "service times from the plan's perf estimates (confidence: roofline)",
+    "time per output token is the estimate's full-batch tpot_ms_p50, constant: its dependence on batch size is not modeled (conservative)",
+    "a request holds input + output KV tokens from admission to completion (full allocation, conservative); it starts only with a free slot and enough KV tokens",
+    "routing: least_outstanding; each replica serves its queue in FIFO order",
+    "windows of 60 s from the first arrival until the last completion; latency p95s and violations are over requests completed in each window",
+    "capacity_rps is the plan's derated capacity, constant across windows",
+    "TTFT budget 500 ms (queueing included for TTFT)",
+    "no TPOT budget set: TPOT violations are not counted"
+  ]
+}
