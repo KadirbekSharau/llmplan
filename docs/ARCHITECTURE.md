@@ -129,6 +129,8 @@ llmplan/
     stats.py             # compute_stats(): peak windows, token percentiles, diurnal
     synth.py             # deterministic synthetic generator
     fetch.py             # consented, checksum-verified public trace download
+    classes.py           # M7: DemandClass, classify() (request-size classes), classify_spec,
+                         #   assign_classes (request -> class for the simulator)
   perf/                  # M3
     config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
     estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
@@ -538,6 +540,26 @@ class RequestLog(BaseModel, frozen=True, arbitrary_types_allowed=True):
 ```
 
 ```python
+# llmplan/workload/classes.py (M7)
+class DemandClass(BaseModel, frozen=True):   # also a perf StatsLike (token means/p50/p95)
+    index: int
+    input_lo: int; input_hi: int          # inclusive token bounds; classes tile
+    output_lo: int; output_hi: int        #   [1, max input] x [0, max output]
+    share: float                          # fraction of requests
+    peak_rps: float                       # class requests in the fleet-wide peak request window
+    peak_output_tokens_per_s: float       # class output tokens in the fleet-wide peak token window
+    input_tokens_mean: float; output_tokens_mean: float
+    input_tokens_p50: float; output_tokens_p50: float   # M7: added so a class is a StatsLike
+    input_tokens_p95: float; output_tokens_p95: float
+    notes: tuple[str, ...] = ()           # cells merged in (< 1% of requests), edges dropped
+
+# classify(workload, *, input_bins=2, output_bins=2, method="quantile"|"fixed",
+#          edges=None, window_s=60.0) -> tuple[DemandClass, ...]
+# classify_spec(workload, "1"|"AxB"|"fixed:<in edges>/<out edges>") ("1" -> () = no classes)
+# assign_classes(classes, input_tokens, output_tokens) -> int64 class index per request
+```
+
+```python
 # llmplan/workload/formats/reader.py (M6)
 @dataclass(frozen=True)
 class InMemoryTrace:                     # an upload parsed without touching the disk
@@ -580,6 +602,7 @@ Downstream code calls only these.
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
 | M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
+| M7 | `llmplan.workload.classify` | `(workload: Workload, *, input_bins: int = 2, output_bins: int = 2, method: Literal["quantile", "fixed"] = "quantile", edges: tuple[tuple[int, ...], tuple[int, ...]] \| None = None, window_s: float = 60.0) -> tuple[DemandClass, ...]` (`window_s`, added in M7, is the peak-window length and must match the `WorkloadStats` the plan uses) |
 | M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`) |
 
 ---

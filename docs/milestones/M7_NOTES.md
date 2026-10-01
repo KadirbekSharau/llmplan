@@ -19,7 +19,41 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   simulate` of that plan on `workload_csv_50.csv`; they must be regenerated if the shipped
   catalogs change).
 
+- **Step 2 — Classes (`llmplan/workload/classes.py`).** Quantile cuts are
+  `floor(numpy.percentile(..., 100 i / bins))` (linear, as M2), applied as inclusive upper
+  bounds (`tokens <= cut` is the lower bin); duplicate cuts and cuts outside `[min, max)`
+  are dropped (a note only for user-given fixed edges). The lowest bins start at 1 input
+  and 0 output tokens and the highest end at the observed maxima, so the classes tile the
+  plane and any request (also from another trace) can be assigned: `assign_classes` picks
+  the class containing it, else the smallest total token distance to a class's bounds,
+  ties to the lowest index. "Merged into their nearest neighbour": input bins under 1% of
+  all requests merge first (into the adjacent bin whose mean input is nearest), then the
+  cells of each input bin along the output axis (nearest mean output), smallest first,
+  until none is under 1%. Merging only along one axis keeps every class a rectangle, so
+  classes never overlap. Empty bins merge into their lower neighbour silently; non-empty
+  merges are noted on the receiving class. Classes are numbered by input bin, then output
+  bin. Bins per axis are limited to 1..6 (the design mentions up to 3x3).
+- **Step 2 — Peak windows.** "Class demand is measured in the fleet-wide peak window": a
+  class's `peak_rps` is its count in the window `compute_stats` reports as the request
+  peak, and its `peak_output_tokens_per_s` its output tokens in the window it reports as
+  the token peak (M4 sizes requests and tokens against those two windows, which may
+  differ). So class demands sum to the workload's, and a single 1x1 class reproduces
+  `peak_window_rps`, `peak_output_tokens_per_s` and the token statistics bit for bit (same
+  numpy calls on the same arrays; test 8.1 relies on it).
+- **Step 2 — `classify_spec`.** The CLI and UI share one parser for `--classes`: `1` (no
+  classes, the M4 path), `AxB` (quantile), `fixed:<input edges>/<output edges>` with
+  comma-separated edges, either side possibly empty (e.g. `fixed:1024,4096/256`).
+
 ## Deviations from the design doc
+
+- **`DemandClass` gains `input_tokens_p50`, `output_tokens_p50` and `notes`.** The perf
+  model's `StatsLike` needs p50s (the roofline's TTFT p50 is input p50 over the prefill
+  rate), and the design wants merges "noted" while `classify` returns only classes. With
+  the p50s a class is passed to the M3 `estimate()` as-is. ARCHITECTURE.md section 4
+  updated.
+- **`classify(..., window_s=60.0)`.** The design's signature has no window; class demand
+  is measured in peak windows, so their length is a parameter (default: `compute_stats`'s
+  60 s). ARCHITECTURE.md section 5 updated.
 
 ## Questions for founder
 
