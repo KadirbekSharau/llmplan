@@ -91,7 +91,40 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   `PlanResult`) moved to `explain.py` unchanged, with capacity added, so no module exceeds
   300 lines.
 
+- **Step 4 — Routing weights.** A weight is the replica type's share of the class's
+  allocated request capacity, `x_{r,k} cap_{r,k} / sum_r x_{r,k} cap_{r,k}`, from the
+  routing LP (with one class, `x_r = m_r`); see Deviations for why not `/ D_k`. A class
+  the LP gives nothing (no peak demand) is spread over the chosen replicas eligible for it
+  in proportion to `m_r cap_{r,k}`; a class no chosen replica can serve gets no rules (the
+  simulator then routes it class-blind). Each rule also carries its replica-equivalents
+  and allocated capacities. The baseline carries the same fields.
+- **Step 4 — Assumptions with two or more classes** add the class split, the routing LP's
+  headroom factor, any merge notes, and one binding line per class instead of M4's single
+  line. With one class (or none) the assumptions are M4's, word for word.
+- **Step 4 — CLI default `--classes 1`.** The prompt allows a 2x2 default only once K=1
+  compatibility is proven by tests; it is (8.1), but the CLI still defaults to `1`: the
+  `--stats-json` input has no rows to classify, M4/M5 unit tests compare `--trace` and
+  `--stats-json` output line by line, and README examples would silently change cost. The
+  UI, which always has the rows, defaults to 2x2 as the design says (step 8).
+  `--classes 2x2` with `--stats-json` exits 2 ("--classes needs --trace").
+- **Step 4 — Text output** gains a class table (bounds, share, peak demand, binding) and a
+  routing table (weight, replica-equivalents, allocated req/s, replica type) after the
+  replicas, only when the plan has classes; K=1 text is unchanged. JSON gains `classes`,
+  `routing` and `class_binding` (empty lists for K=1) after every pre-M7 field.
+
 ## Deviations from the design doc
+
+- **Routing weights are normalized per class.** Section 4 defines the weight as
+  `x_{r,k} cap_{r,k} / D_k`, which sums to more than 1 whenever the fleet has headroom
+  (every solution with spare capacity), while section 8 requires weights that sum to 1 per
+  class. The weight is therefore the share of the class's allocated capacity (the design's
+  formula divided by its sum), and the `x` come from the routing LP rather than the MILP
+  (whose `x` are not unique).
+- **`PlanResult.class_binding: tuple[Binding, ...]`** carries the "per-class binding" of
+  section 4; `PlanResult.classes` holds the request's `DemandClass`es (no separate result
+  model), and `RoutingRule` gains `replicas`, `capacity_rps` and
+  `capacity_output_tokens_per_s` next to the design's `(class_index, candidate, weight)`.
+  ARCHITECTURE.md section 4 updated.
 
 - **`DemandClass` gains `input_tokens_p50`, `output_tokens_p50` and `notes`.** The perf
   model's `StatsLike` needs p50s (the roofline's TTFT p50 is input p50 over the prefill

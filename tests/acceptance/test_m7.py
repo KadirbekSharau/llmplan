@@ -179,7 +179,6 @@ M4_CASES: dict[str, tuple[Mapping[tuple[str, int], FakePerf], Callable[[], PlanR
 }
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the formulation and result commits")
 @pytest.mark.parametrize("case", list(M4_CASES))
 def test_8_1_single_class_reproduces_m4(case: str, fake_perf: UseFakePerf) -> None:
     capacities, make_request, cost = M4_CASES[case]
@@ -208,7 +207,6 @@ def test_8_1_single_class_infeasible_matches(fake_perf: UseFakePerf) -> None:
     assert "slo_ttft" in str(one.value)
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the formulation and result commits")
 def test_8_1_single_class_real_catalogs() -> None:
     from llmplan.workload.classes import classify
 
@@ -277,7 +275,6 @@ def test_8_1_cli_k1_output_matches_pre_m7(tmp_path: Path) -> None:
 # --- 8.2 A cheap GPU that meets the short-class SLO only serves the short class ----------
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the result and routing commit")
 def test_8_2_cheap_gpu_serves_the_short_class_only() -> None:
     trace = two_class_workload()
     req = two_class_request(trace)

@@ -15,9 +15,11 @@ from dataclasses import dataclass
 
 from llmplan.planner.baseline import HomogeneousFleet, best_homogeneous
 from llmplan.planner.candidates import Column
+from llmplan.planner.classes import routing
 from llmplan.planner.model import build_model
 from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import (
+    Binding,
     FleetItem,
     PlanResult,
     ReplicaPlan,
@@ -72,6 +74,51 @@ def relax(used: Sequence[Column], demands: Demands, max_instances_per_row: int) 
             class_demands=demands,
         )
     )
+
+
+def class_binding(request: PlanRequest, relaxed: Relaxation) -> tuple[Binding, ...]:
+    """Each class's binding label (empty without classes)."""
+    if not request.classes:
+        return ()
+    return tuple(binding_label(r, t) for r, t in relaxed.classes)
+
+
+def binding_lines(request: PlanRequest, relaxed: Relaxation) -> list[str]:
+    """How the LP relaxation over the chosen candidates explains the fleet: tight or slack
+    demand constraints and their shadow prices (USD/day per unit), per class with two or
+    more classes."""
+
+    def pair(k: int) -> str:
+        (r_tight, t_tight), (r_price, t_price) = relaxed.classes[k], relaxed.class_shadow_prices[k]
+        return (
+            f"request demand {'tight' if r_tight else 'slack'} (shadow price "
+            f"${r_price + 0.0:.4g}/day per req/s), token demand "
+            f"{'tight' if t_tight else 'slack'} (shadow price ${t_price + 0.0:.4g}/day per "
+            "output token/s)"
+        )
+
+    if len(request.classes) < 2:
+        return [f"binding from the LP relaxation over the chosen candidates: {pair(0)}"]
+    return [
+        f"binding from the LP relaxation over the chosen candidates, class {k}: {pair(k)}"
+        for k in range(len(request.classes))
+    ]
+
+
+def class_lines(request: PlanRequest, fleet: Capacity) -> list[str]:
+    """Assumption lines for two or more request-size classes (none otherwise)."""
+    if len(request.classes) < 2 or fleet.allocation is None:
+        return []
+    lines = [
+        f"demand split into {len(request.classes)} request-size classes, each sized for its "
+        "requests in the peak windows; a candidate serves only the classes whose SLO it meets, "
+        "with capacity estimated at each class's token shape",
+        "routing weights come from an LP over the chosen fleet that maximizes the uniform "
+        f"headroom: every class gets {fleet.allocation.theta:.4g} x its peak demand",
+    ]
+    for c in request.classes:
+        lines.extend(f"class {c.index}: {note}" for note in c.notes)
+    return lines
 
 
 def headroom(capacity: float, demand: float) -> str:
@@ -133,8 +180,9 @@ def _homogeneous_result(
 ) -> PlanResult:
     col, stats = found.column, request.stats
     relaxed = relax([col], demands, request.options.max_instances_per_row)
-    replicas = replica_plans([(col, found.replicas)])
-    fleet_capacity = capacity([(col, found.replicas)], demands)
+    counts = [(col, found.replicas)]
+    replicas = replica_plans(counts)
+    fleet_capacity = capacity(counts, demands)
     return PlanResult(
         fleet=(
             FleetItem(
@@ -167,4 +215,7 @@ def _homogeneous_result(
             "enumeration; candidates are listed on the main result",
             *assumptions(request, replicas),
         ),
+        classes=request.classes,
+        routing=routing(counts, fleet_capacity.allocation, len(request.classes)),
+        class_binding=class_binding(request, relaxed),
     )

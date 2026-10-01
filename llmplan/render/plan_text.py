@@ -1,14 +1,16 @@
 """Plain-text rendering of a `PlanResult` (M4_DESIGN.md section 9).
 
 Sections: summary (cost against the baseline, binding constraint, solver), fleet table,
-replica table with vLLM command lines, the top candidates by $/hour per request/s with
-status and reason, and the assumptions.
+replica table with vLLM command lines, with request-size classes (M7) a class table and the
+routing table, the top candidates by $/hour per request/s with status and reason, and the
+assumptions.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from llmplan.planner.result import label
 from llmplan.render.vllm_cmd import serve_command
 
 if TYPE_CHECKING:
@@ -90,6 +92,40 @@ def _replicas(request: PlanRequest, result: PlanResult) -> list[str]:
     return lines
 
 
+def _tokens(lo: int, hi: int) -> str:
+    return f"{lo:,}..{hi:,}"
+
+
+def _classes(result: PlanResult) -> list[str]:
+    if not result.classes:
+        return []
+    lines = [
+        "",
+        "Classes",
+        f"  {'class':>5}  {'input tokens':<16}{'output tokens':<16}{'share':>7}"
+        f"{'peak req/s':>12}{'peak tok/s':>12}  binding",
+    ]
+    for c, binding in zip(result.classes, result.class_binding, strict=True):
+        lines.append(
+            f"  {c.index:>5}  {_tokens(c.input_lo, c.input_hi):<16}"
+            f"{_tokens(c.output_lo, c.output_hi):<16}{c.share * 100:>6.1f}%"
+            f"{c.peak_rps:>12,.3f}{c.peak_output_tokens_per_s:>12,.1f}  {binding}"
+        )
+    lines.extend(
+        [
+            "",
+            "Routing (share of each class's requests per replica type)",
+            f"  {'class':>5}{'weight':>9}{'replicas':>10}{'req/s':>10}  replica type",
+        ]
+    )
+    lines.extend(
+        f"  {r.class_index:>5}{r.weight * 100:>8.1f}%{r.replicas:>10.3f}"
+        f"{r.capacity_rps:>10,.2f}  {label(r.candidate)}"
+        for r in result.routing
+    )
+    return lines
+
+
 def _candidate(c: CandidateEval) -> str:
     cost = "-" if c.usd_per_hour_per_rps is None else f"{c.usd_per_hour_per_rps:.4g}"
     config = f"tp{c.config.tensor_parallel} {c.config.dtype} seqs{c.config.max_num_seqs}"
@@ -104,6 +140,7 @@ def plan_text(request: PlanRequest, result: PlanResult) -> str:
         *_summary(request, result),
         *_fleet(result),
         *_replicas(request, result),
+        *_classes(result),
         "",
         f"Candidates (top {len(shown)} of {len(result.candidates)} by $/hour per req/s)",
         f"  {'status':<11}{'$/h/rps':>10}  {'candidate':<44}reason",

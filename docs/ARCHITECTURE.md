@@ -475,6 +475,19 @@ class PlanResult(BaseModel, frozen=True):
                                               #   rejected (empty on a baseline)
     solver: SolverInfo
     assumptions: tuple[str, ...]
+    classes: tuple[DemandClass, ...] = ()     # M7: the request's classes (empty: none)
+    routing: tuple[RoutingRule, ...] = ()     # M7: per-class routing weights over the fleet
+    class_binding: tuple[Binding, ...] = ()   # M7: binding label per class
+    # With classes, capacity_* is what the routing LP allocates to the classes, summed, and
+    # `binding` says whether any class's request or token demand is tight.
+
+class RoutingRule(BaseModel, frozen=True):    # M7
+    class_index: int
+    candidate: CandidateEval                  # a planned replica type (matches a ReplicaPlan)
+    weight: float                             # share of the class's requests; sums to 1 per class
+    replicas: float                           # replica-equivalents x_{r,k} from the routing LP
+    capacity_rps: float                       # x_{r,k} * derated class capacity
+    capacity_output_tokens_per_s: float
 ```
 
 ```python

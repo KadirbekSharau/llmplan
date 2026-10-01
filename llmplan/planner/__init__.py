@@ -145,18 +145,13 @@ def plan(request: PlanRequest) -> PlanResult:
     assumptions.append(
         f"dominance pruning removed {len(cols) - len(kept)} of {len(cols)} eligible candidates"
     )
-    assumptions.append(
-        "binding from the LP relaxation over the chosen candidates: request demand "
-        f"{'tight' if relax.requests_tight else 'slack'} (shadow price "
-        f"${relax.requests_shadow_price + 0.0:.4g}/day per req/s), token demand "
-        f"{'tight' if relax.tokens_tight else 'slack'} (shadow price "
-        f"${relax.tokens_shadow_price + 0.0:.4g}/day per output token/s)"
-    )
+    assumptions.extend(explain.binding_lines(request, relax))
     assumptions.append(
         "headroom of the whole-instance fleet over demand: requests "
         f"{explain.headroom(fleet_capacity.rps, demand_rps)}, tokens "
         f"{explain.headroom(fleet_capacity.tps, demand_tps)}"
     )
+    assumptions.extend(explain.class_lines(request, fleet_capacity))
     if solution.status == "feasible_time_limit":
         assumptions.append(
             f"time limit {opts.time_limit_s:g} s reached: the fleet is feasible but not "
@@ -184,6 +179,9 @@ def plan(request: PlanRequest) -> PlanResult:
             n_constraints=solution.n_constraints,
         ),
         assumptions=tuple(assumptions),
+        classes=request.classes,
+        routing=classes.routing(used, fleet_capacity.allocation, len(request.classes)),
+        class_binding=explain.class_binding(request, relax),
     )
 
 

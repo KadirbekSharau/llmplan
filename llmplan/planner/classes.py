@@ -5,6 +5,8 @@ class with the class's token statistics (the M3 `estimate()` takes any `StatsLik
 `DemandClass` is one), cached by (GPU, replica config, class) because several price rows
 share a GPU. A candidate is eligible for the classes whose SLO it meets and has capacity 0
 for the others; it stays a candidate as long as it is eligible for at least one class.
+After the solve, the routing LP's allocation over the chosen fleet becomes per-class
+routing weights.
 """
 
 from __future__ import annotations
@@ -15,9 +17,10 @@ from dataclasses import dataclass
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.errors import PerfError
 from llmplan.perf import PerfEstimate, ReplicaConfig, estimate
-from llmplan.planner.candidates import slo_status
+from llmplan.planner.candidates import Column, slo_status
 from llmplan.planner.request import PlanRequest
-from llmplan.planner.result import CandidateEval, Status, count_statuses
+from llmplan.planner.result import CandidateEval, RoutingRule, Status, count_statuses
+from llmplan.planner.solve import Allocation
 from llmplan.workload.classes import DemandClass
 
 
@@ -144,3 +147,40 @@ def unserved(
                 f"{count_statuses(statuses)}"
             )
     return None
+
+
+def routing(
+    counts: Sequence[tuple[Column, int]], allocation: Allocation | None, n_classes: int
+) -> tuple[RoutingRule, ...]:
+    """Routing rules over a fleet (`counts`: chosen columns and replica counts).
+
+    The weight of replica type r for class k is its share of the class's allocated request
+    capacity, `x_{r,k} cap_{r,k} / sum_r x_{r,k} cap_{r,k}` (with one class, `x_r = m_r`).
+    A class the allocation gives nothing (it has no peak demand) is spread over the
+    replicas eligible for it in proportion to `m_r cap_{r,k}`; a class no chosen replica
+    can serve gets no rules. Rules are ordered by class, then fleet order.
+    """
+    x = allocation.x if allocation is not None else tuple((float(k),) for _, k in counts)
+    rules: list[RoutingRule] = []
+    for k in range(n_classes):
+        shares = [(col, xs[k], col.rates()[k]) for (col, _), xs in zip(counts, x, strict=True)]
+        total = sum(xk * rps for _, xk, (rps, _) in shares)
+        if total <= 0:
+            shares = [(col, 0.0, col.rates()[k]) for col, _ in counts]
+            weights = [m * col.rates()[k][0] for col, m in counts]
+        else:
+            weights = [xk * rps for _, xk, (rps, _) in shares]
+        spread = sum(weights)
+        rules.extend(
+            RoutingRule(
+                class_index=k,
+                candidate=col.candidate,
+                weight=w / spread,
+                replicas=xk,
+                capacity_rps=xk * rps,
+                capacity_output_tokens_per_s=xk * tps,
+            )
+            for (col, xk, (rps, tps)), w in zip(shares, weights, strict=True)
+            if w > 0
+        )
+    return tuple(rules)

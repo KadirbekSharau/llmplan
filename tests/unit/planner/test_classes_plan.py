@@ -233,3 +233,39 @@ def test_plan_request_checks_classes() -> None:
         PlanRequest.model_validate({**fields, "classes": (long, short)})
     with pytest.raises(pydantic.ValidationError, match="shares must sum to 1"):
         PlanRequest.model_validate({**fields, "classes": (short,)})
+
+
+def test_routing_rules_carry_the_allocation(instance: Any) -> None:
+    _, req, _ = instance
+    result = plan(req)
+    short, long = result.routing
+    assert (short.class_index, short.candidate.price_row.instance) == (0, "sa-1x")
+    assert short.replicas == pytest.approx(1.0)
+    assert short.capacity_rps == pytest.approx(4 / 0.15)
+    assert long.capacity_output_tokens_per_s == pytest.approx(400.0)
+    assert result.baseline is not None
+    assert {r.class_index for r in result.baseline.routing} == {0, 1}
+    assert result.baseline.class_binding == ("requests", "requests")
+    assert any("routing weights come from an LP" in a for a in result.assumptions)
+    assert sum("binding from the LP relaxation" in a for a in result.assumptions) == 2
+
+
+def test_routing_for_classes_without_demand() -> None:
+    trace = two_class_workload()
+    req = two_class_request(trace)
+    short, long = req.classes
+    idle_short = short.model_copy(update={"peak_rps": 0.0, "peak_output_tokens_per_s": 0.0})
+    # Only the long class has demand: one SB, and the idle short class is spread over the
+    # replicas that can serve it (SB) by their capacity.
+    result = plan(req.model_copy(update={"classes": (idle_short, long)}))
+    assert [(r.class_index, r.candidate.price_row.instance) for r in result.routing] == [
+        (0, "sb-1x"),
+        (1, "sb-1x"),
+    ]
+    assert result.routing[0].weight == 1.0
+    # With a 50 ms TTFT only SA serves short and nothing serves long; an idle long class
+    # then gets no rules at all.
+    idle_long = long.model_copy(update={"peak_rps": 0.0, "peak_output_tokens_per_s": 0.0})
+    slo = SLO(ttft_ms_p95=50.0, utilization_target=1.0)
+    tight = req.model_copy(update={"classes": (short, idle_long), "slo": slo})
+    assert [r.class_index for r in plan(tight).routing] == [0]

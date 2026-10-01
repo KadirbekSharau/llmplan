@@ -3,7 +3,8 @@
 Registered on the main app in `llmplan.cli`; errors map to exit codes there (4 infeasible,
 5 solver). Workload statistics come from a trace (`--trace`) or from a JSON file
 (`--stats-json`): either the output of `llmplan workload stats --format-out json` or a bare
-`WorkloadStats` object.
+`WorkloadStats` object. `--classes` (M7) splits the trace into request-size classes; it
+needs `--trace`, and its default `1` keeps M4's single-class plan.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from llmplan.memory.engine import EngineProfile
 from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
 from llmplan.render.vllm_cmd import plan_commands
 from llmplan.workload import WorkloadStats, compute_stats, load_workload
+from llmplan.workload.classes import DemandClass, classify_spec
 
 MAX_STATS_JSON_BYTES = 1_000_000
 
@@ -60,11 +62,16 @@ def _stats_from_json(path: Path) -> WorkloadStats:
     return WorkloadStats.model_validate(doc)
 
 
-def _stats(trace: Path | None, stats_json: Path | None) -> WorkloadStats:
+def _demand(
+    trace: Path | None, stats_json: Path | None, classes: str
+) -> tuple[WorkloadStats, tuple[DemandClass, ...]]:
     if trace is not None and stats_json is None:
-        return compute_stats(load_workload(trace))
+        workload = load_workload(trace)
+        return compute_stats(workload), classify_spec(workload, classes)
     if stats_json is not None and trace is None:
-        return _stats_from_json(stats_json)
+        if classes.strip() != "1":
+            raise ValidationError("--classes needs --trace (classes are cut from the rows)")
+        return _stats_from_json(stats_json), ()
     raise ValidationError("pass exactly one of --trace or --stats-json")
 
 
@@ -112,6 +119,12 @@ def plan_command(
     prices: Annotated[
         Path | None, typer.Option("--prices", help="Price catalog YAML (default: shipped).")
     ] = None,
+    classes: Annotated[
+        str,
+        typer.Option(
+            "--classes", help="Request-size classes: 1, 2x2, 3x3, or fixed:<in edges>/<out edges>."
+        ),
+    ] = "1",
     fmt: Annotated[
         Literal["text", "json", "vllm"], typer.Option("--format", help="Output format.")
     ] = "text",
@@ -119,7 +132,7 @@ def plan_command(
     """Cheapest fleet and replica configs that meet peak demand and the latency SLO."""
 
     def produce() -> str:
-        stats = _stats(trace, stats_json)
+        stats, demand_classes = _demand(trace, stats_json, classes)
         catalog = load_gpus(gpu_catalog)
         options = PlanOptions.model_validate(
             {
@@ -145,6 +158,7 @@ def plan_command(
             options=options,
             gpus=catalog,
             prices=load_prices(prices, gpus=catalog),
+            classes=demand_classes,
         )
         result = plan(request)
         if fmt == "vllm":

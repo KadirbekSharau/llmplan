@@ -139,3 +139,26 @@ def test_stats_json_errors(tmp_path: Path) -> None:
     invalid = runner.invoke(app, [*BASE, "--stats-json", str(wrong)])
     assert invalid.exit_code == 2
     assert "error: invalid" in invalid.stderr
+
+
+FIFTY = str(FIXTURES / "workload_csv_50.csv")
+
+
+def test_plan_with_classes(tmp_path: Path) -> None:
+    args = [*BASE, "--trace", FIFTY, "--perf-backend", "roofline", "--classes", "2x2"]
+    text = runner.invoke(app, args)
+    assert text.exit_code == 0, text.stderr
+    assert "\nClasses\n" in text.stdout
+    assert "Routing (share of each class's requests per replica type)" in text.stdout
+    fixed = runner.invoke(app, [*args[:-1], "fixed:1000/", "--format", "json"])
+    assert fixed.exit_code == 0, fixed.stderr
+    assert [c["input_hi"] for c in json.loads(fixed.stdout)["classes"]] == [1000, 5817]  # max input
+    stats = runner.invoke(app, ["workload", "stats", "--trace", TEN, "--format-out", "json"])
+    path = tmp_path / "stats.json"
+    path.write_text(stats.stdout)
+    with_stats = runner.invoke(app, [*BASE, "--stats-json", str(path), "--classes", "2x2"])
+    assert with_stats.exit_code == 2
+    assert "--classes needs --trace" in with_stats.stderr
+    bad = runner.invoke(app, [*args[:-1], "2y2"])
+    assert bad.exit_code == 2
+    assert "classes must be 1, <input bins>x<output bins>" in bad.stderr
