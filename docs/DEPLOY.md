@@ -87,3 +87,24 @@ build -t llmplan .`.
 - `curl -fsS https://<host>/_stcore/health` returns `ok`.
 - A plan on each preset completes in under 60 s (docs/LAUNCH.md checklist).
 - Uploading a file over 50 MB is refused with "Upload refused".
+
+## DigitalOcean Droplet (current production, set up 2026-10-01)
+
+Host: `137.184.154.129` (New York, 1 vCPU, 1 GB RAM, Ubuntu 24.04, hostname `llmplan`).
+Public URL: http://137.184.154.129 (plain HTTP until a domain exists).
+
+One-time setup that was applied (repeat on a new Droplet):
+1. 2 GB swap file (`/swapfile`, in `/etc/fstab`) so the Docker build fits in 1 GB RAM.
+2. `apt-get install docker.io caddy ufw`; `ufw allow OpenSSH, 80/tcp, 443/tcp`; `ufw enable`.
+3. `/etc/caddy/Caddyfile`: `:80 { encode gzip; reverse_proxy 127.0.0.1:8501 }`. To add a
+   domain, replace `:80` with the hostname; Caddy obtains the certificate automatically.
+4. `/var/lib/llmplan` owned by uid 10001 (the container user) for the usage log.
+5. Source is shipped as a `git archive` tarball (the repo is private); the image is built
+   on the Droplet; the container runs with `--restart unless-stopped --memory 512m`, bound
+   to localhost only, with `LLMPLAN_USAGE_LOG=/var/lib/llmplan/usage.jsonl`.
+
+Redeploy the current checkout: `deploy/droplet-redeploy.sh` (about 5 minutes; the app is
+down for the few seconds between container stop and health).
+
+Measured on 2026-10-01: build 1.84 GB image in ~6 min; steady state ~450 MB used of 961 MB
+with the container idle; the app peaks at ~225 MB on the heaviest preset.
