@@ -27,6 +27,17 @@ from llmplan.workload import Workload, WorkloadStats
 LABEL_WIDTH = 10
 
 
+def model_summary(spec: ModelSpec) -> str:
+    """One line on a model (M9, the web UI's model chip): parameters (and active parameters
+    for a mixture of experts), the attention layout, and KV cache bytes per token at bf16."""
+    info = model_info(spec)
+    params = f"{info.param_count / 1e9:,.2f}B parameters"
+    if info.active_param_count != info.param_count:
+        params += f" ({info.active_param_count / 1e9:,.2f}B active)"
+    kv_kib = kv_bytes_per_token_total(spec, "bf16") / 1024
+    return f"{params} · {info.attention.upper()} · {kv_kib:,.0f} KiB KV cache per token (bf16)"
+
+
 def _gb(n_bytes: int) -> str:
     return f"{n_bytes / 1e9:.2f} GB"
 

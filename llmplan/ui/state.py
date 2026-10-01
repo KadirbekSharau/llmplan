@@ -1,10 +1,6 @@
-"""Pure helpers behind the web UI (M6_DESIGN.md sections 4 and 6).
-
-Inputs to a `PlanRequest` and `SimOptions`, price-table validation through `PriceRow`, the
-cache key, the plan-and-replay run (with request-size classes, M7, also the single-class
-cost it is compared with), the timeline window, and the per-session plan brake.
-Every planning decision is a call into `llmplan.*`; nothing here imports Streamlit, so it
-is unit-testable without a browser.
+"""Pure helpers behind the web UI (M6 sections 4, 6): inputs to a `PlanRequest`, price-table
+validation, the cache key, the plan-and-replay run, timeline windows, the plan brake; M9:
+number formats and error hints. Every planning decision is a call into `llmplan.*`.
 """
 
 from __future__ import annotations
@@ -12,7 +8,8 @@ from __future__ import annotations
 import hashlib
 import math
 import threading
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 
@@ -23,7 +20,14 @@ from pydantic import BaseModel, ConfigDict
 
 from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec
-from llmplan.errors import ValidationError
+from llmplan.errors import (
+    FetchError,
+    InfeasiblePlan,
+    LLMPlanError,
+    SolverError,
+    ValidationError,
+    WorkloadFormatError,
+)
 from llmplan.memory.engine import EngineProfile
 from llmplan.perf import PerfBackend
 from llmplan.perf.benchmarks import BenchmarkRow
@@ -44,11 +48,9 @@ _RUN_LOCK = threading.Lock()
 
 
 class PlanRun(BaseModel):
-    """The outcome of one Plan click: the request, the plan, and its replay. With
-    request-size classes (M7), `single_class_cost_usd_per_day` is the cost of the same
-    request planned without them (None when that plan is infeasible or there are no
-    classes) and (M8) `single_class_ttft_violation_pct` the share of requests over the TTFT
-    budget when that single-class fleet is replayed on the same traffic."""
+    """The outcome of one Plan click: the request, the plan, and its replay. With classes
+    (M7) also the cost of the request planned without them (None: infeasible or no classes)
+    and (M8) the share of requests over the TTFT budget when that fleet is replayed."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -95,12 +97,9 @@ def _cell(value: Any) -> Any:
 
 
 def price_rows(frame: pd.DataFrame, gpus: Mapping[str, GPUSpec]) -> tuple[PriceRow, ...]:
-    """Validate an edited price table through `PriceRow` (and the GPU catalog's ids).
-
-    Rows whose cells are all blank (added in the editor and left empty) are skipped.
-    Raises `ValidationError` naming the row index and field of the first invalid row, an
-    unknown `gpu_id`, or an empty table.
-    """
+    """Validate an edited price table through `PriceRow` and the GPU catalog's ids; rows
+    left blank are skipped. Raises `ValidationError` naming the row index and field of the
+    first invalid row, an unknown `gpu_id`, or an empty table."""
     rows: list[PriceRow] = []
     for index, record in enumerate(frame.to_dict("records")):
         values = {column: _cell(record.get(column)) for column in PRICE_COLUMNS}
@@ -140,21 +139,13 @@ def build_request(
     time_limit_s: float,
     classes: tuple[DemandClass, ...] = (),
 ) -> PlanRequest:
-    """Collect the sidebar inputs into a `PlanRequest` (vLLM's default engine profile).
-
-    The solver time limit is capped at 30 s whatever the caller passes (section 6).
-    `classes` are the request-size classes of the traffic (M7; empty: none). Raises
-    `ValidationError` naming an empty selection or the first invalid option.
-    """
-    for name, chosen in (
-        ("GPU", gpu_ids),
-        ("provider", providers),
-        ("tensor parallel degree", tensor_parallel),
-        ("dtype", dtypes),
-        ("max_num_seqs value", max_num_seqs),
-    ):
-        if not chosen:
-            raise ValidationError(f"select at least one {name}")
+    """Collect the inputs into a `PlanRequest` (vLLM's default engine profile), the solver
+    time limit capped at 30 s (section 6); `classes` (M7) may be empty. Raises
+    `ValidationError` naming an empty selection or the first invalid option."""
+    selections = (gpu_ids, providers, tensor_parallel, dtypes, max_num_seqs)
+    names = ("GPU", "provider", "tensor parallel degree", "dtype", "max_num_seqs value")
+    if empty := [name for name, chosen in zip(names, selections, strict=True) if not chosen]:
+        raise ValidationError(f"select at least one {empty[0]}")
     try:
         options = PlanOptions.model_validate(
             {
@@ -186,10 +177,8 @@ def build_request(
 
 
 def timeline_window_s(span_s: float) -> float:
-    """A round window (1, 2 or 5 x 10^k seconds) giving 60 to 200 windows over `span_s`.
-
-    The smallest such value of at least `span_s / 150` is chosen; 1 s for an empty span.
-    """
+    """The smallest round window (1, 2 or 5 x 10^k s) of at least `span_s / 150`, giving 60
+    to 200 windows over `span_s`; 1 s for an empty span."""
     if span_s <= 0:
         return 1.0
     lower = span_s / 150
@@ -198,6 +187,24 @@ def timeline_window_s(span_s: float) -> float:
         round(step * 10.0**e, 12) for e in (exponent, exponent + 1) for step in _WINDOW_STEPS
     )
     return next(w for w in candidates if w >= lower * (1 - 1e-12))
+
+
+def window_choices(window_s: float) -> tuple[float, ...]:
+    """The Timeline tab's windows (M9): round values (1, 2 or 5 x 10^k s) from a fifth of
+    `window_s` to five times it; `window_s` itself is one when it is round."""
+    top = math.floor(math.log10(window_s)) + 1
+    values = (round(s * 10.0**e, 12) for e in range(top - 2, top + 1) for s in _WINDOW_STEPS)
+    return tuple(w for w in values if window_s / 5 * (1 - 1e-9) <= w <= window_s * 5 * (1 + 1e-9))
+
+
+def replay_window(run: PlanRun, workload: Workload, window_s: float) -> Timeline:
+    """The run's replay repeated with windows of `window_s` (the Timeline tab's selector,
+    M9): same plan, trace, routing, budgets and GPU catalog; the plan is not recomputed."""
+    options = run.timeline.options.model_copy(update={"window_s": window_s})
+    with _RUN_LOCK:
+        return replay(
+            run.result, workload, slo=run.request.slo, options=options, gpus=run.request.gpus
+        )
 
 
 def sim_options(stats: WorkloadStats) -> SimOptions:
@@ -220,9 +227,8 @@ def cache_key(
     workload: Workload,
     benchmarks: Sequence[BenchmarkRow] = (),
 ) -> str:
-    """SHA-256 of the request and replay options JSON plus the workload rows' digest (the
-    timeline depends on the rows, not only on the statistics in the request) and (M8) the
-    uploaded benchmark rows, which change the estimates."""
+    """SHA-256 of the request and replay options JSON, the workload rows' digest (the replay
+    reads the rows) and (M8) the uploaded benchmark rows (they change the estimates)."""
     rows = "\n".join(row.model_dump_json() for row in benchmarks)
     digest = hashlib.sha256()
     parts = (request.model_dump_json(), options.model_dump_json(), workload_digest(workload), rows)
@@ -238,19 +244,22 @@ def run_plan(
     options: SimOptions,
     gpus: Mapping[str, GPUSpec],
     backends: Mapping[str, PerfBackend] | None = None,
+    progress: Callable[[str, float], None] | None = None,
 ) -> PlanRun:
-    """Plan, then replay the workload on the planned fleet with the request's SLO budgets.
-
-    A plan with request-size classes is replayed with `class_weighted` routing and is
-    compared with the same request planned without classes, whose fleet is replayed too
-    (`compare_single_class`). When queues make the replay
-    run far past the last arrival (more than 200 windows), it is replayed once more with a
-    window chosen over the full span. `backends` (M8) carries a session's uploaded benchmark
-    rows to the planner. Runs one at a time per process. Raises whatever `plan` and
-    `replay` raise.
-    """
+    """Plan, then replay the workload on the fleet with the request's SLO budgets; a plan with
+    classes is replayed with `class_weighted` routing and compared with the request planned
+    without classes (`compare_single_class`). Over 200 windows, the replay is repeated with
+    a window chosen over its full span. `backends` (M8) carries uploaded benchmark rows;
+    `progress` (M9) gets the seconds of the "estimate" (plan wall time less the solver's),
+    "solve" and "replay" stages. One run at a time per process; raises what `plan` and
+    `replay` raise."""
+    report = progress or (lambda stage, seconds: None)
     with _RUN_LOCK:
+        started = time.perf_counter()
         result = plan(request, backends=backends)
+        planned = time.perf_counter()
+        report("estimate", planned - started - result.solver.solve_time_s)
+        report("solve", result.solver.solve_time_s)
         comparison = compare_single_class(
             request, result, workload, options=options, gpus=gpus, backends=backends
         )
@@ -261,24 +270,16 @@ def run_plan(
             span = len(timeline.windows) * options.window_s
             wider = options.model_copy(update={"window_s": timeline_window_s(span)})
             timeline = replay(result, workload, slo=request.slo, options=wider, gpus=gpus)
-    return PlanRun(
-        request=request,
-        result=result,
-        timeline=timeline,
-        single_class_cost_usd_per_day=None
-        if comparison is None
-        else comparison.single_class_cost_usd_per_day,
-        single_class_ttft_violation_pct=None
-        if comparison is None
-        else comparison.single_class_ttft_violation_pct,
-    )
+        report("replay", time.perf_counter() - planned)
+    single = {} if comparison is None else comparison.model_dump(exclude={"class_cost_usd_per_day"})
+    return PlanRun(request=request, result=result, timeline=timeline, **single)
 
 
 def admit_plan(
     times: Sequence[float], now: float, *, limit: int = MAX_PLANS_PER_HOUR
 ) -> tuple[bool, tuple[float, ...]]:
-    """The per-session brake: whether one more plan may run at `now`, given the times of
-    this session's plans; returns the times of the last hour (plus `now` when admitted)."""
+    """The per-session brake: whether one more plan may run at `now` given this session's
+    plan times; returns the times of the last hour (plus `now` when admitted)."""
     recent = tuple(t for t in times if now - t < SECONDS_PER_HOUR)
     if len(recent) >= limit:
         return False, recent
@@ -303,3 +304,27 @@ def as_of_range(rows: Sequence[PriceRow]) -> tuple[date, date]:
     """Oldest and newest `as_of` dates in a price table (shown next to the editor)."""
     dates = [row.as_of for row in rows]
     return min(dates), max(dates)
+
+
+HINTS: tuple[tuple[type[LLMPlanError], str], ...] = (  # first match wins
+    (InfeasiblePlan, "relax the latency target (TTFT, TPOT, utilization) or add GPUs."),
+    (FetchError, "check the Hugging Face id (org/name), or set HF_TOKEN for a gated model."),
+    (WorkloadFormatError, "use the columns arrival_s or timestamp, input_tokens, output_tokens."),
+    (SolverError, "raise the solver time limit under Advanced, or select fewer options."),
+)
+
+
+def error_text(error: LLMPlanError) -> str:
+    """The library's message, then a "What to change" hint chosen by the error's type."""
+    hint = next((text for kind, text in HINTS if isinstance(error, kind)), None)
+    return str(error) if hint is None else f"{error}\n\nWhat to change: {hint}"
+
+
+def usd(value: float | None) -> str:
+    """Dollars with thousands separators and cents (`$1,234.50`); `n/a` for None."""
+    return "n/a" if value is None else f"${value:,.2f}"
+
+
+def duration(ms: float) -> str:
+    """A duration in ms below one second (3 significant digits), else in seconds."""
+    return f"{ms:.3g} ms" if ms < 1000 else f"{ms / 1000:,.2f} s"

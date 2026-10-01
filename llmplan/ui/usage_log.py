@@ -1,7 +1,5 @@
-"""Anonymous usage log of the web UI (M6_DESIGN.md section 7).
-
-Append-only JSON lines at the path in `LLMPLAN_USAGE_LOG`; logging is off when it is unset.
-Each plan run writes exactly `FIELDS`: input shapes and the outcome. Never the uploaded
+"""Anonymous usage log of the web UI (M6_DESIGN.md section 7): append-only JSON lines at
+`LLMPLAN_USAGE_LOG` (off when unset), exactly `FIELDS` per plan run. Never the uploaded
 rows, the price edits, or anything identifying the visitor (no IPs, no session ids).
 """
 
@@ -36,10 +34,8 @@ FIELDS = (
     "duration_s",
 )
 FOOTER = (
-    "Usage log: when the operator enables it, each plan run records only ts, request_id, "
-    "model_id, gpu_ids, n_requests, peak_rps, slo, cost_usd_per_day, baseline_usd_per_day, "
-    "solver_status and duration_s; uploaded traces, price edits and IP addresses are never "
-    "logged or kept."
+    f"Usage log: when the operator enables it, each plan run records only {', '.join(FIELDS[:-1])} "
+    f"and {FIELDS[-1]}; uploaded traces, price edits and IP addresses are never logged or kept."
 )
 _WRITE_LOCK = threading.Lock()
 
@@ -81,11 +77,8 @@ def usage_record(
 
 
 def append(record: dict[str, Any], path: Path | None = None) -> bool:
-    """Append `record` as one JSON line to `path` (default: `log_path()`).
-
-    Returns False without writing when logging is disabled or the file cannot be written
-    (the failure is logged as a warning; the UI keeps working).
-    """
+    """Append `record` as one JSON line to `path` (default: `log_path()`); False when logging
+    is off or the file cannot be written (logged as a warning; the UI keeps working)."""
     target = path or log_path()
     if target is None:
         return False

@@ -79,7 +79,8 @@ build -t llmplan .`.
    "Secrets" as top-level keys; Community Cloud exposes them as environment variables.
    The local disk there is not persistent, so a usage log written there is lost on
    restart; prefer the Docker path if the launch metrics (PLAN.md section 8) matter.
-5. `.streamlit/config.toml` in the repository sets the upload cap and turns telemetry off.
+5. `.streamlit/config.toml` in the repository sets the upload cap, turns telemetry off and
+   sets the primary colour of the light and dark themes.
 
 ## Publishing to PyPI (one-time setup by the founder)
 

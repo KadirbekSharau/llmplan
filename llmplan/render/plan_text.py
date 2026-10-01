@@ -16,6 +16,9 @@ from llmplan.planner.result import label
 from llmplan.render.vllm_cmd import serve_command
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from llmplan.catalog.hardware import GPUSpec
     from llmplan.planner.request import PlanRequest
     from llmplan.planner.result import CandidateEval, PlanResult
     from llmplan.simulate.compare import ClassComparison
@@ -26,6 +29,19 @@ TOP_CANDIDATES = 10
 
 def _line(label: str, value: str) -> str:
     return f"{label:<{LABEL_WIDTH}}{value}"
+
+
+def fleet_sentence(result: PlanResult, gpus: Mapping[str, GPUSpec]) -> str:
+    """The fleet in one sentence (M9, the web UI's answer card), e.g. `2 x H100 SXM 80GB
+    (runpod h100-sxm) serving 2 replicas`: GPUs per price row by catalog name, then the
+    replica count. `gpus` is the catalog the plan was made with."""
+    parts = []
+    for item in result.fleet:
+        row = item.price_row
+        name = gpus[row.gpu_id].name.removeprefix("NVIDIA ")
+        parts.append(f"{item.instances * row.gpu_count} x {name} ({row.provider} {row.instance})")
+    replicas = sum(r.count for r in result.replicas)
+    return f"{' + '.join(parts)} serving {replicas} replica{'s' if replicas != 1 else ''}"
 
 
 def _usd(value: float) -> str:

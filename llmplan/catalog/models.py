@@ -34,6 +34,12 @@ _REVISION_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _FIXTURE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
+def is_repo_id(value: str) -> bool:
+    """Whether `value` is a Hugging Face repo id the fetcher accepts (`org/name`, letters,
+    digits, `.`, `_`, `-`, no `..`); M9: the web UI checks share links with it too."""
+    return bool(_REPO_ID_RE.fullmatch(value)) and ".." not in value
+
+
 class ModelSpec(BaseModel):
     """Architectural integers of one decoder (ARCHITECTURE.md section 4).
 
@@ -167,7 +173,7 @@ class HttpConfigFetcher:
         self._timeout_s = timeout_s
 
     def fetch(self, repo_id: str, revision: str = "main") -> dict[str, Any]:
-        if not _REPO_ID_RE.fullmatch(repo_id) or ".." in repo_id:
+        if not is_repo_id(repo_id):
             raise FetchError(f"invalid Hugging Face repo id {repo_id!r}; expected 'org/name'")
         if not _REVISION_RE.fullmatch(revision) or ".." in revision:
             raise FetchError(f"invalid revision {revision!r}")

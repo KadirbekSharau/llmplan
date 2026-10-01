@@ -58,7 +58,8 @@ small, readable, and safe.
   file plus a registration line; nothing else changes.
 - The planner core is a library. The CLI and the web UI are thin adapters over it. Nothing
   in the core imports Streamlit, argparse, or matplotlib (only `render/plots.py` does, and
-  it is imported lazily by the CLI).
+  it is imported lazily by the CLI). M9: `render/charts.py` imports Altair (shipped with
+  Streamlit) and only the web UI imports it.
 - Data flows through immutable models, so stages can run in parallel or be cached by hash
   of their inputs later without redesign.
 
@@ -174,11 +175,12 @@ llmplan/
     text.py              # M1
     json_render.py       # M1 (named to avoid shadowing stdlib json)
     workload_text.py     # M2 `workload stats` text (moved from cli_workload.py in M4)
-    plan_text.py         # M4 `plan` text (M7: class and routing tables)
+    plan_text.py         # M4 `plan` text (M7: class and routing tables; M9: fleet_sentence)
     vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
     timeline_text.py     # M5 `simulate` text
     timeline_json.py     # M5 `simulate` JSON
     plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png and the UI)
+    charts.py            # M9 interactive timeline and routing charts (Altair specs; the UI only)
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
@@ -186,13 +188,16 @@ llmplan/
   cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
   cli_simulate.py        # M5: `llmplan simulate` command, registered in cli.py
   cli_ui.py              # M6: `llmplan ui` (Streamlit bootstrap in-process; lazy import)
-  ui/                    # M6: Streamlit app; thin. Only app.py, views.py and (M8) calibrate.py
-                         #   import streamlit
-    app.py               # the page: sidebar inputs, one Plan button, last outcome (< 400 lines)
-    views.py             # result sections rendered from library results
+  ui/                    # M6: Streamlit app; thin, under 1,500 lines (M9). Only app.py,
+                         #   views.py and (M8) calibrate.py import streamlit
+    app.py               # the page: four input steps (sidebar or compact), Plan, progress
+    views.py             # header, empty state, answer card, five result tabs, footer
     state.py             # pure helpers: PlanRequest from inputs, PriceRow validation of the
-                         #   edited table, cache key, run_plan (plan + replay), window, brake
-    presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits
+                         #   edited table, cache key, run_plan (plan + replay), windows (M9:
+                         #   choices, replay_window), brake; M9: number formats, error hints
+    presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits; M9: INPUTS
+                         #   (every input's default and choices or bounds), example scenarios
+    share.py             # M9: share links (inputs <-> query parameters, validated on load)
     usage_log.py         # opt-in JSON-lines usage log (LLMPLAN_USAGE_LOG)
     calibrate.py         # M8: "Calibrate with your own benchmarks" sidebar and report
   data/                  # package data, shipped in the wheel (M8; was data/ at the repo root)
@@ -695,7 +700,7 @@ Downstream code calls only these.
 | M8 (implemented) | `llmplan.perf.uploads.load_upload` | `(data: bytes, model: ModelSpec, gpus: Mapping[str, GPUSpec], *, run: VllmRun \| None = None, today: date \| None = None) -> BenchmarkUpload` (llmplan CSV or vLLM `--save-result` JSON; rows validated like shipped rows, rejections with index and reason; `ValidationError` for file-level problems); `upload_backends(rows) -> dict[str, PerfBackend]` is the `backends=` override for `estimate`/`plan` |
 | M8 (implemented) | `llmplan.simulate.compare.compare_single_class` | `(request: PlanRequest, result: PlanResult, workload: Workload \| None = None, *, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None, backends: Mapping[str, PerfBackend] \| None = None) -> ClassComparison \| None` (the request planned without classes, its fleet replayed on `workload`) |
 | M8 (implemented) | `llmplan.perf.contribute.contribute_url` | `(rows: Sequence[BenchmarkRow]) -> tuple[str, bool]` (prefilled GitHub issue URL and whether it carries the rows; 6,000-character cap) |
-| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec], backends: Mapping[str, PerfBackend] \| None = None) -> PlanRun` (M8: `backends` = uploaded rows, also keyed into `cache_key`; plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec], backends: Mapping[str, PerfBackend] \| None = None, progress: Callable[[str, float], None] \| None = None) -> PlanRun` (M9: `progress` is told the seconds of the `estimate`, `solve` and `replay` stages for the page's progress steps; M8: `backends` = uploaded rows, also keyed into `cache_key`; plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
 
 ---
 
@@ -712,7 +717,7 @@ no entry points, until an external contributor needs one.
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5). `class_weighted` (M7) needs the plan's routing weights and each request's class, so it is built per replay by `class_weighted(replica_types, rules, request_class) -> Route` rather than registered |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); M8: `plan(PlanRequest, PlanResult, comparison: ClassComparison | None = None)` adds the class/single-class comparison (text: a "Request-size routing" sentence; JSON: a `class_comparison` object, ignored by `load_plan_json`); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); M8: `plan(PlanRequest, PlanResult, comparison: ClassComparison | None = None)` adds the class/single-class comparison (text: a "Request-size routing" sentence; JSON: a `class_comparison` object, ignored by `load_plan_json`); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI). `render/charts.py` (M9) holds `timeline_chart(Timeline)` and `routing_chart(PlanResult)`, Altair specs drawn by the web UI; `plan_text.fleet_sentence(PlanResult, gpus)` and `text.model_summary(ModelSpec)` are one-line summaries for its answer card and model chip |
 
 ---
 

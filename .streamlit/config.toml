@@ -1,7 +1,17 @@
 # Streamlit settings for `streamlit run llmplan/ui/app.py` (Streamlit Community Cloud, Docker).
-# `llmplan ui` passes the same values as flags.
+# `llmplan ui` passes the server and browser values as flags; the theme is read from this
+# file when the app starts from the repository root (Docker's WORKDIR /app included).
 [server]
 maxUploadSize = 50  # MB; the app also refuses anything over 50,000,000 bytes before parsing
 
 [browser]
 gatherUsageStats = false  # no Streamlit telemetry from visitors' browsers
+
+# One primary colour for the light and the dark theme (set per theme, so visitors keep the
+# system light/dark switch): 4.6:1 against white (also behind a primary button's white
+# label) and 4.1:1 against the dark background. The base font is left unchanged.
+[theme.light]
+primaryColor = "#1F6FEB"
+
+[theme.dark]
+primaryColor = "#1F6FEB"
