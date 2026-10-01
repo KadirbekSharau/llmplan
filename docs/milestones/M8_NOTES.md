@@ -196,6 +196,29 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   test_resolve_hf_class` used `MixtralForCausalLM` as its example of an unsupported class;
   it now asserts that Mixtral resolves to `mixtral` and uses `GPT2LMHeadModel` as the
   unsupported example.
+- **Step 5 — Live Hugging Face checks (9.11).** `tests/live/test_hf_configs.py`
+  (`pytestmark = pytest.mark.network`, deselected by default and in both CI jobs) fetches
+  each config through the M1 `HttpConfigFetcher`, asserts the parameter count within 1.5%
+  of the official figure recorded in the test, and runs `fit()` (bf16, one H100, 4,096
+  tokens; "fit runs" is the requirement, not "fits"). Run once on 2026-10-01 12:09 UTC
+  with `uv run pytest -m network tests/live --no-cov -v -s` (no `HF_TOKEN` set):
+
+  ```
+  Qwen/Qwen2.5-7B-Instruct: llama_like, params 7,615,616,512 (active 7,615,616,512), official 7.61B (model card: Number of Parameters 7.61B), off by 0.07%; fit bf16 on 1 x H100: fits=True binding=ok
+  PASSED
+  mistralai/Mistral-7B-v0.3: llama_like, params 7,248,023,552 (active 7,248,023,552), official 7.25B (Hugging Face model page: 7.25B params), off by 0.03%; fit bf16 on 1 x H100: fits=True binding=ok
+  PASSED
+  mistralai/Mixtral-8x7B-Instruct-v0.1: mixtral, params 46,702,792,704 (active 12,879,925,248), official 46.7B (Mistral AI: 46.7B total parameters), off by 0.01%; fit bf16 on 1 x H100: fits=False binding=weights
+  PASSED
+  Qwen/Qwen3-30B-A3B: qwen_moe, params 30,532,122,624 (active 3,353,032,704), official 30.5B (model card: 30.5B total, 3.3B activated), off by 0.11%; fit bf16 on 1 x H100: fits=True binding=ok
+  PASSED
+  meta-llama/Llama-3.1-8B-Instruct SKIPPED (gated; set HF_TOKEN to check it)
+  ========================= 4 passed, 1 skipped in 2.15s =========================
+  ```
+
+  The live Mixtral and Qwen3-MoE counts equal the fixture values exactly, so the fixtures
+  carry the real integers. Llama-3.1-8B is gated and no token is available to this agent;
+  its integers equal `fixture:llama3-8b` (8,030,261,248, M1), 0.00% from 8.03B.
 
 ## Deviations from the design doc
 
