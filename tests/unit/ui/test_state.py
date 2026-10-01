@@ -142,3 +142,29 @@ def test_admit_plan_brakes_at_30_per_hour() -> None:
 
 def test_as_of_range() -> None:
     assert state.as_of_range(SHIPPED) == (date(2026, 9, 30), date(2026, 9, 30))
+
+
+def test_run_plan_with_classes_routes_by_weight_and_compares() -> None:
+    from tests.acceptance.test_m7 import two_class_request, two_class_workload
+
+    trace = two_class_workload()
+    req = two_class_request(trace)
+    run = state.run_plan(req, trace, SimOptions(), req.gpus)
+    assert run.timeline.options.routing == "class_weighted"
+    assert run.single_class_cost_usd_per_day == 144.0
+    assert run.class_saving_pct == pytest.approx(100 / 3)  # $96 against $144 (M7_NOTES.md)
+    # Only the short class has demand and only SA is priced: without classes SA misses the
+    # whole workload's TTFT, so there is no single-class fleet to compare with.
+    short, long = req.classes
+    idle = long.model_copy(update={"peak_rps": 0.0, "peak_output_tokens_per_s": 0.0})
+    only_sa = req.model_copy(update={"classes": (short, idle), "prices": (req.prices[0],)})
+    alone = state.run_plan(only_sa, trace, SimOptions(), req.gpus)
+    assert alone.single_class_cost_usd_per_day is None
+    assert alone.class_saving_pct is None
+    from llmplan.ui import views  # the page's wording of both cases
+
+    assert views._saving(run) == "33.3% (sized for the mean request: $144.00/day)"
+    assert views._saving(alone).startswith("n/a (no fleet without classes")
+    legacy = state.run_plan(req.model_copy(update={"classes": ()}), trace, SimOptions(), req.gpus)
+    assert legacy.timeline.options.routing == "least_outstanding"
+    assert legacy.single_class_cost_usd_per_day is None

@@ -33,6 +33,7 @@ DEFAULT_DTYPES: tuple[DType, ...] = ("bf16", "fp8")
 MAX_NUM_SEQS_CHOICES = (16, 32, 64, 128, 256, 512)
 DEFAULT_MAX_NUM_SEQS = (32, 64, 128, 256)
 PERF_BACKENDS = ("auto", "roofline", "table")
+CLASS_CHOICES = ("2x2", "1", "3x3")  # M7: request-size classes; the first is the default
 SOLVERS = ("highs", "cp_sat", "scip", "gurobi")
 
 # Model picker: shipped fixtures (offline) and popular dense Hugging Face ids (fetched only

@@ -18,25 +18,35 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llmplan.simulate.events import EngineRun, StepLog
 from llmplan.simulate.replica import ReplicaSpec
+from llmplan.simulate.stepfn import linear_windows, step_windows
 
 FloatArray = npt.NDArray[np.float64]
 
 
+RoutingName = Literal["least_outstanding", "round_robin", "class_weighted"]
+KVAccounting = Literal["incremental", "full"]
+
+
 class SimOptions(BaseModel):
     """Replay settings. `max_requests` truncates the trace (with an assumption note); `seed`
-    is reserved for tie-breaking (both policies break ties deterministically, so it does
+    is reserved for tie-breaking (every policy breaks ties deterministically, so it does
     not change results today). Budgets default to the SLO's p95 targets when one is given
-    to `replay`; with no budget, violations of that kind are not counted.
+    to `replay`; with no budget, violations of that kind are not counted. M7:
+    `routing="class_weighted"` follows the plan's per-class routing weights;
+    `kv_accounting="incremental"` (default) reserves a request's mean KV occupancy at
+    admission and grows its KV in use as tokens are generated, `"full"` reserves input +
+    output at admission (M5's behaviour).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     window_s: float = Field(default=60.0, gt=0)
-    routing: Literal["least_outstanding", "round_robin"] = "least_outstanding"
+    routing: RoutingName = "least_outstanding"
     max_requests: int = Field(default=500_000, gt=0)
     seed: int = Field(default=0, ge=0)
     ttft_budget_ms: float | None = Field(default=None, gt=0)
     tpot_budget_ms: float | None = Field(default=None, gt=0)
+    kv_accounting: KVAccounting = "incremental"
 
 
 class ReplicaWindowRecord(BaseModel):
@@ -100,10 +110,26 @@ class SimulationSummary(BaseModel):
     max_queue_depth: int = Field(ge=0)
 
 
+class ClassSummary(BaseModel):
+    """M7: one request-size class of the plan over the whole replay: how many simulated
+    requests it had, their TTFT and E2E p95 (None when it had none), and the percentage
+    of them over the TTFT and TPOT budgets."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_index: int = Field(ge=0)
+    n_requests: int = Field(ge=0)
+    ttft_ms_p95: float | None
+    e2e_ms_p95: float | None
+    ttft_violation_pct: float = Field(ge=0, le=100)
+    tpot_violation_pct: float = Field(ge=0, le=100)
+
+
 class Timeline(BaseModel):
     """What the planned fleet does over the trace: per-window records, a summary, the
-    options used (budgets resolved), and the modeling assumptions. Contains no wall-clock
-    values, so its JSON is byte-identical for identical inputs."""
+    options used (budgets resolved), the modeling assumptions, and (M7) one summary per
+    request-size class of the plan (empty for a plan without classes). Contains no
+    wall-clock values, so its JSON is byte-identical for identical inputs."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -112,6 +138,7 @@ class Timeline(BaseModel):
     windows: tuple[WindowRecord, ...]
     summary: SimulationSummary
     assumptions: tuple[str, ...]
+    classes: tuple[ClassSummary, ...] = ()
 
 
 def build_timeline(
@@ -123,8 +150,10 @@ def build_timeline(
     options: SimOptions,
     n_truncated: int,
     assumptions: tuple[str, ...],
+    n_classes: int = 0,
 ) -> Timeline:
-    """Aggregate an engine run into windows and a summary (M5_DESIGN.md section 7)."""
+    """Aggregate an engine run into windows and a summary (M5_DESIGN.md section 7), plus
+    one `ClassSummary` per class for `n_classes` request-size classes (M7)."""
     frame = run.requests.frame
     arrival = frame["arrival_s"].to_numpy()
     complete = frame["complete_s"].to_numpy()
@@ -190,7 +219,35 @@ def build_timeline(
         windows=windows,
         summary=summary,
         assumptions=assumptions,
+        classes=_class_summaries(
+            frame["class_index"].to_numpy(), n_classes, ttft, e2e, ttft_bad, tpot_bad
+        ),
     )
+
+
+def _class_summaries(
+    labels: npt.NDArray[np.int64],
+    n_classes: int,
+    ttft: FloatArray,
+    e2e: FloatArray,
+    ttft_bad: FloatArray,
+    tpot_bad: FloatArray,
+) -> tuple[ClassSummary, ...]:
+    out = []
+    for k in range(n_classes):
+        mine = labels == k
+        count = int(mine.sum())
+        out.append(
+            ClassSummary(
+                class_index=k,
+                n_requests=count,
+                ttft_ms_p95=float(np.percentile(ttft[mine], 95)) if count else None,
+                e2e_ms_p95=float(np.percentile(e2e[mine], 95)) if count else None,
+                ttft_violation_pct=float(ttft_bad[mine].mean()) * 100 if count else 0.0,
+                tpot_violation_pct=float(tpot_bad[mine].mean()) * 100 if count else 0.0,
+            )
+        )
+    return tuple(out)
 
 
 def _violations(values_ms: FloatArray, budget_ms: float | None) -> FloatArray:
@@ -226,16 +283,19 @@ def _replica_windows(
     finished: npt.NDArray[np.int64],
 ) -> list[ReplicaWindowRecord]:
     w = float(bounds[1] - bounds[0])
-    busy, _ = _step_windows(step.time_s, step.busy_slots, bounds)
-    kv_sum, kv_max = _step_windows(step.time_s, step.kv_tokens, bounds)
-    queue_sum, queue_max = _step_windows(step.time_s, step.queue_depth, bounds)
+    busy, _ = step_windows(step.time_s, step.busy_slots, bounds)
+    if step.kv_slope.any():  # incremental KV accounting: linear between events
+        kv_sum, kv_max = linear_windows(step.time_s, step.kv_tokens, step.kv_slope, bounds)
+    else:
+        kv_sum, kv_max = step_windows(step.time_s, step.kv_tokens, bounds)
+    queue_sum, queue_max = step_windows(step.time_s, step.queue_depth, bounds)
     return [
         ReplicaWindowRecord(
             replica_index=index,
             utilization=min(1.0, float(busy[k]) / (spec.slots * w)),
             kv_tokens_in_use_mean=round(float(kv_sum[k]) / w),
-            kv_tokens_in_use_max=int(kv_max[k]),
-            kv_bytes_in_use_max=int(kv_max[k]) * spec.kv_bytes_per_token,
+            kv_tokens_in_use_max=round(float(kv_max[k])),
+            kv_bytes_in_use_max=round(float(kv_max[k])) * spec.kv_bytes_per_token,
             weight_bytes=spec.weight_bytes,
             queue_depth_mean=float(queue_sum[k]) / w,
             queue_depth_max=int(queue_max[k]),
@@ -245,29 +305,3 @@ def _replica_windows(
         )
         for k in range(len(bounds) - 1)
     ]
-
-
-def _step_windows(
-    time_s: FloatArray, value: FloatArray, bounds: FloatArray
-) -> tuple[FloatArray, FloatArray]:
-    """Integral and maximum per window of a step function that is 0 before `time_s[0]` and
-    takes `value[i]` from `time_s[i]` on. Window `k` is `[bounds[k], bounds[k + 1])`; states
-    that last zero time (several events at one instant) still count toward the maximum."""
-    n = len(bounds) - 1
-    time_s = np.concatenate([bounds[:1], time_s])  # explicit idle state at the origin
-    value = np.concatenate([[0.0], value])
-    at_bounds = value[np.searchsorted(time_s, bounds, side="right") - 1]
-    times = np.concatenate([time_s, bounds])
-    values = np.concatenate([value, at_bounds])
-    order = np.argsort(times, kind="stable")  # at equal times, bounds follow the events
-    times, values = times[order], values[order]
-    window = np.searchsorted(bounds, times, side="right") - 1
-    inside = window < n
-    integral = np.bincount(
-        window[:-1][inside[:-1]],
-        weights=(np.diff(times) * values[:-1])[inside[:-1]],
-        minlength=n,
-    ).astype(np.float64)
-    maximum = np.zeros(n)
-    np.maximum.at(maximum, window[inside], values[inside])
-    return integral, maximum

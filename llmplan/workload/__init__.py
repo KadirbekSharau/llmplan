@@ -2,7 +2,8 @@
 
 Public API: `load_workload` (ARCHITECTURE.md section 5), `compute_stats`, `generate`, and
 the models `Workload`, `WorkloadStats`, `Distribution`, plus `InMemoryTrace` for traces
-that must not touch the disk (M6 web uploads).
+that must not touch the disk (M6 web uploads), and request-size classes (M7): `classify`,
+`DemandClass`.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from pathlib import Path
 
 from llmplan.errors import ValidationError
 from llmplan.workload import formats
+from llmplan.workload.classes import DemandClass, classify
 from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, InMemoryTrace
 from llmplan.workload.schema import Distribution, Workload, WorkloadStats
 from llmplan.workload.stats import compute_stats
@@ -40,10 +42,12 @@ def load_workload(
 
 __all__ = [
     "DEFAULT_MAX_BYTES",
+    "DemandClass",
     "Distribution",
     "InMemoryTrace",
     "Workload",
     "WorkloadStats",
+    "classify",
     "compute_stats",
     "generate",
     "load_workload",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -22,6 +22,7 @@ from llmplan.memory.fit import FitResult
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate
 from llmplan.planner.request import SLO
+from llmplan.workload.classes import DemandClass
 
 Status = Literal["eligible", "no_fit", "slo_ttft", "slo_tpot", "no_perf", "tp_gt_gpus"]
 Binding = Literal["requests", "tokens", "both", "none"]
@@ -90,6 +91,23 @@ class SolverInfo(BaseModel):
     n_constraints: int = Field(ge=0)
 
 
+class RoutingRule(BaseModel):
+    """M7: the share `weight` of class `class_index`'s requests to send to the replicas of
+    `candidate`, and what the routing LP gives that class there: `replicas` replica-
+    equivalents (`x_{r,k}`), worth `capacity_rps` req/s and `capacity_output_tokens_per_s`
+    output tokens/s (derated). A class's weights sum to 1; a weight is that replica type's
+    share of the class's allocated request capacity."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    class_index: int = Field(ge=0)
+    candidate: CandidateEval
+    weight: float = Field(gt=0, le=1)
+    replicas: float = Field(ge=0)
+    capacity_rps: float = Field(ge=0)
+    capacity_output_tokens_per_s: float = Field(ge=0)
+
+
 class PlanResult(BaseModel):
     """The cheapest fleet found for a `PlanRequest` and its explanation.
 
@@ -99,7 +117,10 @@ class PlanResult(BaseModel):
     M4_NOTES.md). `baseline` is the best homogeneous fleet (None when the request was
     homogeneous or no single row can meet demand), and `baseline_saving_pct` is
     `(baseline - cost) / baseline * 100`. `candidates` holds every candidate, eligible first
-    in order of `usd_per_hour_per_rps`, then the rejected ones.
+    in order of `usd_per_hour_per_rps`, then the rejected ones. M7: `classes` are the
+    request's demand classes, `routing` the per-class routing weights over the fleet, and
+    `class_binding` each class's binding label (all empty without classes; then `binding`
+    is M4's, else it says whether any class's request or token demand is tight).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -117,6 +138,9 @@ class PlanResult(BaseModel):
     candidates: tuple[CandidateEval, ...]
     solver: SolverInfo
     assumptions: tuple[str, ...]
+    classes: tuple[DemandClass, ...] = ()
+    routing: tuple[RoutingRule, ...] = ()
+    class_binding: tuple[Binding, ...] = ()
 
 
 def binding_label(requests_tight: bool, tokens_tight: bool) -> Binding:
@@ -130,7 +154,12 @@ def binding_label(requests_tight: bool, tokens_tight: bool) -> Binding:
 
 def status_counts(candidates: Sequence[CandidateEval]) -> str:
     """`"40 no_fit, 56 slo_ttft"`: nonzero rejection counts in `Status` order."""
-    counts = Counter(c.status for c in candidates)
+    return count_statuses(c.status for c in candidates)
+
+
+def count_statuses(statuses: Iterable[Status]) -> str:
+    """`"40 no_fit, 56 slo_ttft"` for any statuses (M7: per-class verdicts)."""
+    counts = Counter(statuses)
     parts = [f"{counts[s]} {s}" for s in get_args(Status) if s != "eligible" and counts[s]]
     return ", ".join(parts) or "none rejected"
 

@@ -4,13 +4,13 @@ CPU-only planner for self-hosted LLM inference: given a model, traffic, a latenc
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
 
-Status: M1 to M6 implemented (model and GPU/price catalogs with exact VRAM fit, workload
-ingestion, performance model, MILP fleet planner, trace replay with a utilization
-timeline, and a Streamlit web UI). Documents drive the work:
+Status: M1 to M7 implemented (model and GPU/price catalogs with exact VRAM fit, workload
+ingestion, performance model, MILP fleet planner with request-size demand classes, trace
+replay with a utilization timeline, and a Streamlit web UI). Documents drive the work:
 
 - [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
-- [docs/MILESTONES.md](docs/MILESTONES.md) — M0 to M6, acceptance criteria, review checklist
+- [docs/MILESTONES.md](docs/MILESTONES.md) — M0 to M7, acceptance criteria, review checklist
 - [docs/milestones/M1_DESIGN.md](docs/milestones/M1_DESIGN.md) — detailed design for the first milestone
 - [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) — rules every milestone must satisfy
 - [docs/FOUNDER_QUESTIONS.md](docs/FOUNDER_QUESTIONS.md) — decisions waiting on the founder
@@ -33,6 +33,9 @@ uv sync
 TTFT/TPOT target and GPU prices (editable), click Plan, and get the cheapest fleet, a
 `vllm serve` line per replica, the utilization timeline of a replay, every candidate with
 its reason, the assumptions, and JSON downloads. Nothing recomputes until Plan is clicked.
+Under Advanced, "Request-size classes" (default 2x2) plans each request size on the GPUs
+that meet the target for it; the results then show the routing table, each class's
+replayed latency, and the saving against sizing every replica for the mean request.
 
 ```
 uv run llmplan ui
@@ -144,9 +147,21 @@ bounds; queueing is not modeled), `--utilization 0.8` (capacity derating), `--gp
 h100-sxm-80gb,l40s-48gb`, `--providers aws,lambda`, `--tp 1,2,4,8`, `--dtypes bf16,fp8`,
 `--max-num-seqs 32,64,128,256`, `--homogeneous`, `--perf-backend {auto,roofline,table}`,
 `--solver {highs,cp_sat,scip,gurobi}` (SCIP and Gurobi only when OR-Tools can load them),
-`--time-limit 60`, `--gpu-catalog PATH`, `--prices PATH`, `--format {text,json,vllm}`.
-Solves are single-threaded and seeded, so the JSON output is byte-identical across runs.
-The fleet is sized for the peak window only (no autoscaling yet).
+`--time-limit 60`, `--gpu-catalog PATH`, `--prices PATH`, `--format {text,json,vllm}`,
+`--classes {1,2x2,3x3,...,fixed:<input edges>/<output edges>}` (request-size classes,
+needs `--trace`; default `1`, one class sized for the mean request). Solves are
+single-threaded and seeded, so the JSON output is byte-identical across runs. The fleet is
+sized for the peak window only (no autoscaling yet).
+
+With classes, the trace is cut into input x output token bins (`2x2`: median splits;
+`fixed:1024,4096/256`: your edges, inclusive upper bounds), each class is estimated at its
+own request shape and served only by candidates that meet the SLO for it, and the output
+adds a class table and a routing table (the share of each class's requests per replica
+type):
+
+```
+uv run llmplan plan --model fixture:llama3-8b --trace data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
+```
 
 **`llmplan simulate`** — replay a trace on a planned fleet and show what it does over time:
 per-window demand against capacity, utilization, KV cache in use and queue depth per
@@ -160,12 +175,18 @@ uv run llmplan plan --model fixture:llama3-8b --trace tests/fixtures/workload_10
 uv run llmplan simulate --plan plan.json --trace tests/fixtures/workload_csv_50.csv --png timeline.png
 ```
 
-Options: `--window 60` (seconds), `--routing {least_outstanding,round_robin}`,
+Options: `--window 60` (seconds), `--routing
+{auto,least_outstanding,round_robin,class_weighted}` (`auto`, the default, follows a
+class plan's routing weights and is `least_outstanding` otherwise), `--kv-accounting
+{incremental,full}` (`incremental`, the default, reserves a request's mean KV occupancy
+and grows its KV as tokens are generated; `full` reserves input + output at admission),
 `--ttft-p95-ms`, `--tpot-p95-ms` (budgets; default: the SLO recorded in the plan file, and
 without either no violations are counted), `--png PATH` (four-panel figure, rendered
 headless; its VRAM panel splits the fleet's memory into weights, KV in use and free),
 `--gpu-catalog PATH` (the GPU catalog the plan used, for total VRAM; default: shipped),
-`--format {text,json}`. The plan can also be piped:
+`--requests-csv PATH` (one row per simulated request: arrival, start, completion, TTFT,
+TPOT, E2E, replica, KV tokens, class), `--format {text,json}`. A plan with classes adds
+one summary line (and JSON entry) per class. The plan can also be piped:
 `uv run llmplan plan ... --format json | uv run llmplan simulate --plan /dev/stdin --trace
 TRACE`. The JSON output is byte-identical across runs.
 
@@ -189,6 +210,9 @@ uv audit
 uv build
 ```
 
-The web UI tests run headless and offline with `streamlit.testing.v1.AppTest`. The bundled
+The web UI tests run headless and offline with `streamlit.testing.v1.AppTest`. The M7
+Mélange cross-check is reproduced with `uv run --with pulp==2.8.0 python
+scripts/melange_crosscheck.py --melange-dir DIR` on a checkout of melange-release
+(docs/milestones/M7_NOTES.md). The bundled
 trace samples are regenerated with `uv run python scripts/make_samples.py TRACES_DIR` from
 the full traces (`llmplan traces fetch NAME --dest TRACES_DIR --yes`, outside the repo).

@@ -13,7 +13,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M4 | done | m4-planner, PR #3 (141115e) |
 | M5 | done | m5-simulate, PR #4 (ade5b93) |
 | M6 | done | m6-ui, PR #5 (0f64b0b) |
-| M7 | in progress | m7-demand-classes |
+| M7 | ready for review | m7-demand-classes |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
 

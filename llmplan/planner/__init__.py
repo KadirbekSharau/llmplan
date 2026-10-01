@@ -1,39 +1,29 @@
 """MILP fleet planner (M4): `plan(PlanRequest) -> PlanResult` (ARCHITECTURE.md section 5).
 
-Pipeline: validate, enumerate and evaluate candidates, prune dominated ones, build and
-solve the MILP, explain the binding constraint with an LP relaxation, and compare against
-the best homogeneous fleet.
+Pipeline: validate, enumerate and evaluate candidates (per request-size class too, M7),
+prune dominated ones, build and solve the MILP, explain the binding constraint with an LP
+relaxation, and compare against the best homogeneous fleet.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 
 from llmplan import perf
 from llmplan.errors import CatalogError, InfeasiblePlan, SolverError, ValidationError
-from llmplan.planner.baseline import HomogeneousFleet, best_homogeneous
-from llmplan.planner.candidates import (
-    Column,
-    columns,
-    evaluate_candidates,
-    prune_dominated,
-    rows_in_scope,
-)
+from llmplan.planner import classes, explain
+from llmplan.planner.candidates import columns, evaluate_candidates, prune_dominated, rows_in_scope
 from llmplan.planner.model import HOURS_PER_DAY, build_model
 from llmplan.planner.request import SLO, PlanOptions, PlanRequest
 from llmplan.planner.result import (
     CandidateEval,
     FleetItem,
     PlanResult,
-    ReplicaPlan,
     SolverInfo,
     binding_label,
     infeasible_reason,
-    label,
 )
-from llmplan.planner.solve import INTEGER_ONLY, TIGHT_TOLERANCE, Relaxation, check_backend
-from llmplan.planner.solve import relaxation as solve_relaxation
+from llmplan.planner.solve import INTEGER_ONLY, TIGHT_TOLERANCE, check_backend
 from llmplan.planner.solve import solve as solve_model
 
 __all__ = ["SLO", "PlanOptions", "PlanRequest", "PlanResult", "plan"]
@@ -71,118 +61,17 @@ def _sorted(candidates: Sequence[CandidateEval]) -> tuple[CandidateEval, ...]:
     )
 
 
-def _relax(used: Sequence[Column], request: PlanRequest) -> Relaxation:
-    """LP relaxation over the columns the fleet uses (see M4_NOTES.md, binding)."""
-    stats = request.stats
-    return solve_relaxation(
-        build_model(
-            used,
-            demand_rps=stats.peak_window_rps,
-            demand_tps=stats.peak_output_tokens_per_s,
-            homogeneous=False,
-            max_instances_per_row=request.options.max_instances_per_row,
-            relax=True,
-        )
-    )
-
-
-def _headroom(capacity: float, demand: float) -> str:
-    if demand <= 0:
-        return "n/a (no demand)"
-    return f"+{max(0.0, (capacity / demand - 1) * 100):.1f}%"
-
-
-def _replicas(counts: Sequence[tuple[Column, int]]) -> tuple[ReplicaPlan, ...]:
-    return tuple(
-        ReplicaPlan(
-            candidate=col.candidate,
-            count=count,
-            instances=math.ceil(count * col.tp / col.candidate.price_row.gpu_count),
-        )
-        for col, count in counts
-        if count > 0
-    )
-
-
-def _assumptions(request: PlanRequest, replicas: Sequence[ReplicaPlan]) -> list[str]:
-    stats, slo = request.stats, request.slo
-    confidence = "; ".join(
-        f"{label(r.candidate)}: {r.candidate.perf.backend}/{r.candidate.perf.confidence}"
-        for r in replicas
-        if r.candidate.perf is not None
-    )
-    return [
-        f"capacity derated to {slo.utilization_target:g} x the estimated throughput "
-        "(utilization_target)",
-        "GPUs left idle on a paid instance are paid for (leftover-GPU waste)",
-        f"sized for the peak {stats.window_s:g} s window ({stats.peak_window_rps:g} req/s, "
-        f"{stats.peak_output_tokens_per_s:g} output tokens/s); no autoscaling in M4",
-        "TTFT and TPOT are p95 service-time estimates without queueing (queueing is M5)",
-        f"perf confidence of chosen replicas: {confidence}",
-    ]
-
-
-def _baseline(request: PlanRequest, cols: Sequence[Column]) -> PlanResult | None:
-    stats = request.stats
-    found = best_homogeneous(
-        cols,
-        stats.peak_window_rps,
-        stats.peak_output_tokens_per_s,
-        request.options.max_instances_per_row,
-    )
-    if found is None:
-        return None
-    return _homogeneous_result(request, found)
-
-
-def _homogeneous_result(request: PlanRequest, found: HomogeneousFleet) -> PlanResult:
-    col, stats = found.column, request.stats
-    relax = _relax([col], request)
-    replicas = _replicas([(col, found.replicas)])
-    return PlanResult(
-        fleet=(
-            FleetItem(
-                price_row=col.candidate.price_row,
-                instances=found.instances,
-                usd_per_day=found.usd_per_day,
-            ),
-        ),
-        replicas=replicas,
-        cost_usd_per_day=found.usd_per_day,
-        baseline=None,
-        baseline_saving_pct=None,
-        demand_rps=stats.peak_window_rps,
-        demand_output_tokens_per_s=stats.peak_output_tokens_per_s,
-        capacity_rps=col.rps * found.replicas,
-        capacity_output_tokens_per_s=col.tps * found.replicas,
-        binding=binding_label(relax.requests_tight, relax.tokens_tight),
-        candidates=(),
-        solver=SolverInfo(
-            backend="enumeration",
-            status="optimal",
-            objective_usd_per_day=found.usd_per_day,
-            best_bound_usd_per_day=found.usd_per_day,
-            solve_time_s=0.0,
-            n_variables=0,
-            n_constraints=0,
-        ),
-        assumptions=(
-            "baseline: best fleet of one price row and one replica configuration, by "
-            "enumeration; candidates are listed on the main result",
-            *_assumptions(request, replicas),
-        ),
-    )
-
-
 def plan(request: PlanRequest) -> PlanResult:
     """Find the cheapest fleet and replica configurations meeting peak demand and the SLO.
 
-    Demand is the workload's peak window (`peak_window_rps`, `peak_output_tokens_per_s`);
-    each candidate's capacity is derated by `slo.utilization_target`. Raises
-    `ValidationError` (`max_model_len` too long), `CatalogError` (unknown GPU id),
-    `UnknownRegistryKey` (unknown perf backend), `InfeasiblePlan` with a reason built from
-    the candidate statuses, and `SolverError` (backend unavailable, time limit without a
-    fleet). Same request, same result: solves are single-threaded, seeded, time-limited.
+    Demand is the workload's peak window (`peak_window_rps`, `peak_output_tokens_per_s`),
+    or, with `request.classes` (M7), each class's peak demand, which only candidates meeting
+    that class's SLO may serve; each candidate's capacity is derated by
+    `slo.utilization_target`. Raises `ValidationError` (`max_model_len` too long),
+    `CatalogError` (unknown GPU id), `UnknownRegistryKey` (unknown perf backend),
+    `InfeasiblePlan` with a reason built from the candidate statuses, and `SolverError`
+    (backend unavailable, time limit without a fleet). Same request, same result: solves
+    are single-threaded, seeded, time-limited.
     """
     _validate(request)
     opts, slo, stats = request.options, request.slo, request.stats
@@ -193,18 +82,35 @@ def plan(request: PlanRequest) -> PlanResult:
             f"{opts.providers or 'any'}, commitments {list(opts.commitments)}"
         )
     candidates = evaluate_candidates(request, rows, request.gpus)
-    cols = columns(candidates, slo)
+    class_perf = None
+    if request.classes:
+        evals = classes.evaluate_classes(request, candidates, request.gpus)
+        candidates = tuple(
+            classes.reconcile(c, e, slo.utilization_target)
+            for c, e in zip(candidates, evals, strict=True)
+        )
+        class_perf = [
+            None if e is None else tuple(x.perf if x.status == "eligible" else None for x in e)
+            for e in evals
+        ]
+    cols = columns(candidates, slo, class_perf)
     if not cols:
         raise _infeasible(infeasible_reason(candidates))
+    if request.classes:
+        missing = classes.unserved(request, evals, candidates)
+        if missing is not None:
+            raise _infeasible(missing)
+    demands = classes.demands(request)
     kept = prune_dominated(cols)
     demand_rps, demand_tps = stats.peak_window_rps, stats.peak_output_tokens_per_s
     formulation = build_model(
         kept,
-        demand_rps=demand_rps,
-        demand_tps=demand_tps,
+        demand_rps=demands[0][0],
+        demand_tps=demands[0][1],
         homogeneous=opts.homogeneous,
         max_instances_per_row=opts.max_instances_per_row,
         integer_scaling=opts.solver in INTEGER_ONLY,
+        class_demands=demands,
     )
     try:
         solution = solve_model(
@@ -218,7 +124,7 @@ def plan(request: PlanRequest) -> PlanResult:
             f"{demand_rps:g} req/s and {demand_tps:g} output tokens/s"
         ) from None
     counts = list(zip(kept, solution.replicas, strict=True))
-    replicas = _replicas(counts)
+    replicas = explain.replica_plans(counts)
     fleet = tuple(
         FleetItem(
             price_row=row, instances=n, usd_per_day=HOURS_PER_DAY * row.price_usd_per_hour * n
@@ -227,32 +133,25 @@ def plan(request: PlanRequest) -> PlanResult:
         if n > 0
     )
     cost = sum(item.usd_per_day for item in fleet)
-    capacity_rps = sum(col.rps * k for col, k in counts)
-    capacity_tps = sum(col.tps * k for col, k in counts)
-    if capacity_rps < demand_rps * (1 - TIGHT_TOLERANCE) or capacity_tps < demand_tps * (
-        1 - TIGHT_TOLERANCE
-    ):
-        raise SolverError(f"{opts.solver} returned a fleet below demand ({capacity_rps:g} req/s)")
-    relax = _relax([col for col, k in counts if k > 0], request)
-    baseline = None if opts.homogeneous else _baseline(request, cols)
+    used = [(col, k) for col, k in counts if k > 0]
+    fleet_capacity = explain.capacity(used, demands)
+    _check_demand(fleet_capacity, demands, opts.solver)
+    relax = explain.relax([col for col, _ in used], demands, opts.max_instances_per_row)
+    baseline = None if opts.homogeneous else explain.baseline(request, cols, demands)
     saving = None
     if baseline is not None:
         saving = (baseline.cost_usd_per_day - cost) / baseline.cost_usd_per_day * 100
-    assumptions = _assumptions(request, replicas)
+    assumptions = explain.assumptions(request, replicas)
     assumptions.append(
         f"dominance pruning removed {len(cols) - len(kept)} of {len(cols)} eligible candidates"
     )
-    assumptions.append(
-        "binding from the LP relaxation over the chosen candidates: request demand "
-        f"{'tight' if relax.requests_tight else 'slack'} (shadow price "
-        f"${relax.requests_shadow_price + 0.0:.4g}/day per req/s), token demand "
-        f"{'tight' if relax.tokens_tight else 'slack'} (shadow price "
-        f"${relax.tokens_shadow_price + 0.0:.4g}/day per output token/s)"
-    )
+    assumptions.extend(explain.binding_lines(request, relax))
     assumptions.append(
         "headroom of the whole-instance fleet over demand: requests "
-        f"{_headroom(capacity_rps, demand_rps)}, tokens {_headroom(capacity_tps, demand_tps)}"
+        f"{explain.headroom(fleet_capacity.rps, demand_rps)}, tokens "
+        f"{explain.headroom(fleet_capacity.tps, demand_tps)}"
     )
+    assumptions.extend(explain.class_lines(request, fleet_capacity))
     if solution.status == "feasible_time_limit":
         assumptions.append(
             f"time limit {opts.time_limit_s:g} s reached: the fleet is feasible but not "
@@ -266,8 +165,8 @@ def plan(request: PlanRequest) -> PlanResult:
         baseline_saving_pct=saving,
         demand_rps=demand_rps,
         demand_output_tokens_per_s=demand_tps,
-        capacity_rps=capacity_rps,
-        capacity_output_tokens_per_s=capacity_tps,
+        capacity_rps=fleet_capacity.rps,
+        capacity_output_tokens_per_s=fleet_capacity.tps,
         binding=binding_label(relax.requests_tight, relax.tokens_tight),
         candidates=_sorted(candidates),
         solver=SolverInfo(
@@ -280,4 +179,23 @@ def plan(request: PlanRequest) -> PlanResult:
             n_constraints=solution.n_constraints,
         ),
         assumptions=tuple(assumptions),
+        classes=request.classes,
+        routing=classes.routing(used, fleet_capacity.allocation, len(request.classes)),
+        class_binding=explain.class_binding(request, relax),
     )
+
+
+def _check_demand(
+    fleet: explain.Capacity, demands: Sequence[tuple[float, float]], solver: str
+) -> None:
+    """Refuse a fleet below demand (beyond 1e-6 relative): one class against its two
+    demands, several against the routing LP's uniform headroom."""
+    if fleet.allocation is not None:
+        short = fleet.allocation.theta < 1 - TIGHT_TOLERANCE
+    else:
+        (demand_rps, demand_tps), *_ = demands
+        short = fleet.rps < demand_rps * (1 - TIGHT_TOLERANCE) or fleet.tps < demand_tps * (
+            1 - TIGHT_TOLERANCE
+        )
+    if short:
+        raise SolverError(f"{solver} returned a fleet below demand ({fleet.rps:g} req/s)")

@@ -1,8 +1,8 @@
 """Plain-text rendering of a `Timeline` (M5_DESIGN.md section 8).
 
-A summary block, a compact table with one row per window (demand, completions, mean
-utilization over replicas, maximum queue depth over replicas, violations), and the
-assumptions.
+A summary block, with request-size classes (M7) one line per class, a compact table with
+one row per window (demand, completions, mean utilization over replicas, maximum queue
+depth over replicas, violations), and the assumptions.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from llmplan.simulate import Timeline, WindowRecord
+    from llmplan.simulate import ClassSummary, Timeline, WindowRecord
 
 LABEL_WIDTH = 10
 
@@ -35,6 +35,16 @@ def _row(w: WindowRecord) -> str:
     return (
         f"  {w.index:>6}{w.start_s:>11,.0f}{w.demand_rps:>12,.3f}{w.completions:>13,}"
         f"{util * 100:>10.1f}%{queue:>11,}{w.ttft_violations:>11,}{w.tpot_violations:>11,}"
+    )
+
+
+def _class(c: ClassSummary) -> str:
+    if c.ttft_ms_p95 is None:
+        return _line(f"Class {c.class_index}", "0 requests")
+    return _line(
+        f"Class {c.class_index}",
+        f"{c.n_requests:,} requests, TTFT p95 {c.ttft_ms_p95:,.1f} ms, "
+        f"{c.ttft_violation_pct:.2f}% TTFT and {c.tpot_violation_pct:.2f}% TPOT violations",
     )
 
 
@@ -64,6 +74,7 @@ def timeline_text(timeline: Timeline) -> str:
             "Windows",
             f"{len(timeline.windows):,} x {options.window_s:g} s, routing {options.routing}",
         ),
+        *(_class(c) for c in timeline.classes),
         "",
         f"  {'window':>6}{'start_s':>11}{'demand_rps':>12}{'completions':>13}{'util':>11}"
         f"{'queue_max':>11}{'ttft_viol':>11}{'tpot_viol':>11}",

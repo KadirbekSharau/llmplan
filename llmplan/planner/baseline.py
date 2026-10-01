@@ -2,7 +2,9 @@
 
 For each eligible column alone, the minimum replicas meeting both demands and the instances
 of its price row they need; the cheapest over all columns (first in candidate order on
-ties) is the baseline. No solver is involved.
+ties) is the baseline. No solver is involved. With request-size classes (M7) one column
+must serve every class with demand, and its replicas split their time between classes, so
+it needs `ceil(sum_k max(D_k / cap_k, T_k / tok_k))` replicas.
 """
 
 from __future__ import annotations
@@ -27,24 +29,42 @@ class HomogeneousFleet:
     usd_per_day: float
 
 
-def replicas_needed(demand: float, capacity: float) -> int:
-    """Smallest integer `k` with `k * capacity >= demand` (0 when there is no demand)."""
-    if demand <= 0:
-        return 0
-    return math.ceil(demand / capacity * (1 - RATIO_GUARD))
+def replica_equivalents(
+    rates: Sequence[tuple[float, float]], demands: Sequence[tuple[float, float]]
+) -> float | None:
+    """Replicas (fractional) one column needs for every class: `sum_k max(D_k / cap_k,
+    T_k / tok_k)`, or None when it cannot serve a class that has demand."""
+    total = 0.0
+    for capacities, needs in zip(rates, demands, strict=True):
+        need = 0.0
+        for demand, capacity in zip(needs, capacities, strict=True):
+            if demand > 0:
+                if capacity <= 0:
+                    return None
+                need = max(need, demand / capacity)
+        total += need
+    return total
 
 
 def best_homogeneous(
-    cols: Sequence[Column], demand_rps: float, demand_tps: float, max_instances_per_row: int
+    cols: Sequence[Column],
+    demand_rps: float,
+    demand_tps: float,
+    max_instances_per_row: int,
+    *,
+    class_demands: Sequence[tuple[float, float]] = (),
 ) -> HomogeneousFleet | None:
     """Cheapest single-column fleet meeting both demands within `max_instances_per_row`,
-    or None when no column can."""
+    or None when no column can. With two or more `class_demands` (M7) those replace the
+    one-class demand and are matched against `Column.rates()`."""
+    demands = tuple(class_demands) if len(class_demands) >= 2 else ((demand_rps, demand_tps),)
     best: HomogeneousFleet | None = None
     for col in cols:
         row = col.candidate.price_row
-        replicas = max(
-            replicas_needed(demand_rps, col.rps), replicas_needed(demand_tps, col.tps), 1
-        )
+        needed = replica_equivalents(col.rates(), demands)
+        if needed is None:
+            continue
+        replicas = max(math.ceil(needed * (1 - RATIO_GUARD)), 1)
         instances = math.ceil(replicas / col.candidate.replicas_per_instance)
         if instances > max_instances_per_row:
             continue

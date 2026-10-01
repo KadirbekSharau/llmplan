@@ -129,6 +129,8 @@ llmplan/
     stats.py             # compute_stats(): peak windows, token percentiles, diurnal
     synth.py             # deterministic synthetic generator
     fetch.py             # consented, checksum-verified public trace download
+    classes.py           # M7: DemandClass, classify() (request-size classes), classify_spec,
+                         #   assign_classes (request -> class for the simulator)
   perf/                  # M3
     config.py            # ReplicaConfig, fit_for() (M1 fit for one replica)
     estimate.py          # StatsLike, PerfEstimate, PerfBackend protocol + registry, estimate()
@@ -140,23 +142,30 @@ llmplan/
     __init__.py          # plan() (M4 public API): validate, evaluate, prune, solve, explain
     request.py           # SLO, PlanOptions, PlanRequest
     candidates.py        # candidate enumeration and pre-solve checks, Column, dominance pruning
-    model.py             # MathOpt formulation (pure: columns in, model out)
-    solve.py             # backend selection, parameters, determinism, LP relaxation (GLOP)
+    classes.py           # M7: per-class candidate estimates and verdicts, class demands
+    model.py             # MathOpt formulation (pure: columns in, model out); M7 class model
+                         #   (allocations x_{r,k}) and the routing LP over a fixed fleet
+    solve.py             # backend selection, parameters, determinism, LP relaxation and
+                         #   routing LP (GLOP)
+    explain.py           # M7 (moved from __init__): capacity, binding LP, assumptions, baseline
     baseline.py          # best homogeneous fleet by enumeration (no solver)
     result.py            # CandidateEval, ReplicaPlan, FleetItem, SolverInfo, PlanResult
   simulate/              # M5
     __init__.py          # replay(), replay_requests() (M5 public API)
     replica.py           # ReplicaSpec from a planned candidate, ReplicaState (slots, KV, queue)
     events.py            # heap-based event loop, RequestLog, per-replica step logs
-    routing.py           # routing policy registry: least_outstanding, round_robin
+    routing.py           # routing policy registry: least_outstanding, round_robin;
+                         #   M7 class_weighted builder (deficit rule over the plan's weights)
     timeline.py          # SimOptions, Timeline, WindowRecord, ReplicaWindowRecord,
-                         #   SimulationSummary, window aggregation (numpy)
+                         #   SimulationSummary, ClassSummary (M7), window aggregation (numpy)
+    stepfn.py            # M7 (moved from timeline): window integrals/maxima of state logs,
+                         #   step and piecewise-linear (incremental KV)
   render/                # output adapters: text table, JSON, vLLM command line, plots
     __init__.py          # Renderer protocol, register(), get()
     text.py              # M1
     json_render.py       # M1 (named to avoid shadowing stdlib json)
     workload_text.py     # M2 `workload stats` text (moved from cli_workload.py in M4)
-    plan_text.py         # M4 `plan` text
+    plan_text.py         # M4 `plan` text (M7: class and routing tables)
     vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
     timeline_text.py     # M5 `simulate` text
     timeline_json.py     # M5 `simulate` JSON
@@ -419,6 +428,8 @@ class PlanRequest(BaseModel, frozen=True):
     options: PlanOptions
     gpus: Mapping[str, GPUSpec]               # catalogs passed explicitly (tests inject rows)
     prices: tuple[PriceRow, ...]
+    classes: tuple[DemandClass, ...] = ()     # M7: from classify() on the same trace; () = one
+                                              #   class (the whole workload, M4 behaviour)
 
 # llmplan/planner/result.py (M4)
 class CandidateEval(BaseModel, frozen=True):
@@ -467,6 +478,19 @@ class PlanResult(BaseModel, frozen=True):
                                               #   rejected (empty on a baseline)
     solver: SolverInfo
     assumptions: tuple[str, ...]
+    classes: tuple[DemandClass, ...] = ()     # M7: the request's classes (empty: none)
+    routing: tuple[RoutingRule, ...] = ()     # M7: per-class routing weights over the fleet
+    class_binding: tuple[Binding, ...] = ()   # M7: binding label per class
+    # With classes, capacity_* is what the routing LP allocates to the classes, summed, and
+    # `binding` says whether any class's request or token demand is tight.
+
+class RoutingRule(BaseModel, frozen=True):    # M7
+    class_index: int
+    candidate: CandidateEval                  # a planned replica type (matches a ReplicaPlan)
+    weight: float                             # share of the class's requests; sums to 1 per class
+    replicas: float                           # replica-equivalents x_{r,k} from the routing LP
+    capacity_rps: float                       # x_{r,k} * derated class capacity
+    capacity_output_tokens_per_s: float
 ```
 
 ```python
@@ -477,11 +501,13 @@ class PlanResult(BaseModel, frozen=True):
 # llmplan/simulate/timeline.py (M5)
 class SimOptions(BaseModel, frozen=True):
     window_s: float = 60.0               # gt=0, finite
-    routing: Literal["least_outstanding", "round_robin"] = "least_outstanding"
+    routing: Literal["least_outstanding", "round_robin", "class_weighted"] = "least_outstanding"
     max_requests: int = 500_000          # trace is truncated (with a note) beyond this
     seed: int = 0                        # reserved for tie-breaking (unused: ties are by index)
     ttft_budget_ms: float | None = None  # defaults to slo.ttft_ms_p95 when given
     tpot_budget_ms: float | None = None
+    kv_accounting: Literal["incremental", "full"] = "incremental"   # M7: reserve mean
+                                         #   occupancy, KV grows while decoding; "full" = M5
 
 class ReplicaWindowRecord(BaseModel, frozen=True):
     replica_index: int
@@ -522,19 +548,49 @@ class SimulationSummary(BaseModel, frozen=True):
     mean_utilization: float              # across replicas and windows
     max_queue_depth: int
 
+class ClassSummary(BaseModel, frozen=True):   # M7: one request-size class of the plan
+    class_index: int
+    n_requests: int
+    ttft_ms_p95: float | None            # None when the class had no requests
+    e2e_ms_p95: float | None
+    ttft_violation_pct: float
+    tpot_violation_pct: float
+
 class Timeline(BaseModel, frozen=True):  # no wall-clock fields: JSON is byte-identical
     plan_cost_usd_per_day: float
     options: SimOptions                  # budgets resolved against the SLO
     windows: tuple[WindowRecord, ...]    # from the first arrival until the last completion
     summary: SimulationSummary
     assumptions: tuple[str, ...]
+    classes: tuple[ClassSummary, ...] = ()   # M7: per plan class (empty without classes)
 
 # llmplan/simulate/events.py (M5)
 class RequestLog(BaseModel, frozen=True, arbitrary_types_allowed=True):
     frame: pd.DataFrame                  # one row per simulated request, trace order:
                                          #   arrival_s, start_s, complete_s (float64 s),
                                          #   ttft_ms, tpot_ms, e2e_ms (float64 ms),
-                                         #   replica_index, kv_tokens (int64)
+                                         #   replica_index, kv_tokens, class_index (int64;
+                                         #   class_index added in M7, 0 without classes)
+```
+
+```python
+# llmplan/workload/classes.py (M7)
+class DemandClass(BaseModel, frozen=True):   # also a perf StatsLike (token means/p50/p95)
+    index: int
+    input_lo: int; input_hi: int          # inclusive token bounds; classes tile
+    output_lo: int; output_hi: int        #   [1, max input] x [0, max output]
+    share: float                          # fraction of requests
+    peak_rps: float                       # class requests in the fleet-wide peak request window
+    peak_output_tokens_per_s: float       # class output tokens in the fleet-wide peak token window
+    input_tokens_mean: float; output_tokens_mean: float
+    input_tokens_p50: float; output_tokens_p50: float   # M7: added so a class is a StatsLike
+    input_tokens_p95: float; output_tokens_p95: float
+    notes: tuple[str, ...] = ()           # cells merged in (< 1% of requests), edges dropped
+
+# classify(workload, *, input_bins=2, output_bins=2, method="quantile"|"fixed",
+#          edges=None, window_s=60.0) -> tuple[DemandClass, ...]
+# classify_spec(workload, "1"|"AxB"|"fixed:<in edges>/<out edges>") ("1" -> () = no classes)
+# assign_classes(classes, input_tokens, output_tokens) -> int64 class index per request
 ```
 
 ```python
@@ -549,6 +605,9 @@ class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
     request: PlanRequest
     result: PlanResult
     timeline: Timeline
+    single_class_cost_usd_per_day: float | None = None   # M7: the request planned without
+                                         #   classes (None: no classes, or infeasible);
+                                         #   property class_saving_pct
 
 # llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
 class SamplePreset(BaseModel, frozen=True):
@@ -577,10 +636,11 @@ Downstream code calls only these.
 | M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path \| InMemoryTrace, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 50 MB cap; `InMemoryTrace(name, data)`, added in M6, parses an upload from memory so it is never written to disk) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
-| M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
-| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
+| M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet; M7: `PlanRequest.classes` switches on request-size classes, and a class with demand but no eligible candidate is `InfeasiblePlan`) |
+| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`; M7: `options.routing="class_weighted"` follows `plan.routing`, `options.kv_accounting` picks incremental or full KV) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
-| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`) |
+| M7 (implemented) | `llmplan.workload.classify` | `(workload: Workload, *, input_bins: int = 2, output_bins: int = 2, method: Literal["quantile", "fixed"] = "quantile", edges: tuple[tuple[int, ...], tuple[int, ...]] \| None = None, window_s: float = 60.0) -> tuple[DemandClass, ...]` (`window_s`, added in M7, is the peak-window length and must match the `WorkloadStats` the plan uses) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
 
 ---
 
@@ -596,7 +656,7 @@ no entry points, until an external contributor needs one.
 | Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(source, *, max_bytes) -> Workload`; `detect(source) -> str` (`source` is a `Path` or, since M6, an `InMemoryTrace`) | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5) |
+| Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5). `class_weighted` (M7) needs the plan's routing weights and each request's class, so it is built per replay by `class_weighted(replica_types, rules, request_class) -> Route` rather than registered |
 | Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
 
 ---

@@ -5,6 +5,12 @@ capacities per `(gpu_id, tensor_parallel)` from `FAKE_PERF`, which tests fill th
 `fake_perf` fixture (tests/conftest.py) so entries never leak between tests. Fake GPUs
 have 10 TB of VRAM so every candidate fits (fit itself is the real M1 code). `sim_plan`
 builds the M5 test plans: exact service times and, optionally, a small KV cache.
+
+M7 adds two class-aware fakes. `"fake_shape"` derives every figure from the token
+statistics it is given (a request-size class or the whole workload) and a fixed prefill
+rate and time per output token per GPU (`SHAPE_PERF`). `"fake_class"` returns fixed
+capacities per `(gpu_id, tensor_parallel)` and class index from `FAKE_CLASS_PERF` (filled
+by the `fake_class_perf` fixture); a class it marks None fails a 500 ms TTFT SLO.
 """
 
 from __future__ import annotations
@@ -73,6 +79,102 @@ class FakeBackend:
         return f"no fake capacity for ({gpu.id}, tp {config.tensor_parallel})"
 
 
+@dataclass(frozen=True)
+class ShapePerf:
+    prefill_tokens_per_s: float
+    tpot_s: float
+
+
+SHAPE_PERF: dict[str, ShapePerf] = {
+    "shape-a": ShapePerf(prefill_tokens_per_s=2_000.0, tpot_s=0.01),
+    "shape-b": ShapePerf(prefill_tokens_per_s=20_000.0, tpot_s=0.01),
+}
+
+
+@register("fake_shape")
+class ShapeBackend:
+    """capacity = max_num_seqs / (input_mean / prefill + output_mean * tpot); decode tokens/s
+    = max_num_seqs / tpot; TTFT p50/p95 = input p50/p95 / prefill; TPOT p50 = p95 = tpot."""
+
+    name = "fake_shape"
+
+    def estimate(
+        self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike
+    ) -> PerfEstimate | None:
+        spec = SHAPE_PERF.get(gpu.id)
+        if spec is None:
+            return None
+        batch = config.max_num_seqs
+        service_s = (
+            stats.input_tokens_mean / spec.prefill_tokens_per_s
+            + stats.output_tokens_mean * spec.tpot_s
+        )
+        return PerfEstimate(
+            backend="table",
+            confidence="measured",
+            effective_batch=batch,
+            decode_tokens_per_s=batch / spec.tpot_s,
+            prefill_tokens_per_s=spec.prefill_tokens_per_s,
+            requests_per_s_capacity=batch / service_s,
+            ttft_ms_p50=stats.input_tokens_p50 / spec.prefill_tokens_per_s * 1000,
+            ttft_ms_p95=stats.input_tokens_p95 / spec.prefill_tokens_per_s * 1000,
+            tpot_ms_p50=spec.tpot_s * 1000,
+            tpot_ms_p95=spec.tpot_s * 1000,
+            assumptions=("fake shape backend",),
+            source_urls=(),
+        )
+
+    def explain(
+        self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike
+    ) -> str:
+        return f"no fake shape for {gpu.id}"
+
+
+ClassCapacity = tuple[float, float] | None  # (req/s, output tokens/s) or ineligible
+FAKE_CLASS_PERF: dict[tuple[str, int], tuple[ClassCapacity, ...]] = {}
+INELIGIBLE_TTFT_MS = 10_000.0  # fails the 500 ms SLO of the class-aware tests
+
+
+@register("fake_class")
+class ClassBackend:
+    """Fixed capacities per (gpu_id, tensor_parallel) and class index (`stats.index`); the
+    whole workload (no `index`) gets the first eligible class's figures."""
+
+    name = "fake_class"
+
+    def estimate(
+        self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike
+    ) -> PerfEstimate | None:
+        per_class = FAKE_CLASS_PERF.get((gpu.id, config.tensor_parallel))
+        if per_class is None:
+            return None
+        index = getattr(stats, "index", None)
+        if index is None:
+            entry = next((c for c in per_class if c is not None), None)
+        else:
+            entry = per_class[index]
+        rps, tps = (1.0, 1.0) if entry is None else entry
+        return PerfEstimate(
+            backend="table",
+            confidence="measured",
+            effective_batch=config.max_num_seqs,
+            decode_tokens_per_s=tps,
+            prefill_tokens_per_s=10_000.0,
+            requests_per_s_capacity=rps,
+            ttft_ms_p50=50.0,
+            ttft_ms_p95=INELIGIBLE_TTFT_MS if entry is None else 100.0,
+            tpot_ms_p50=5.0,
+            tpot_ms_p95=10.0,
+            assumptions=("fake class backend",),
+            source_urls=(),
+        )
+
+    def explain(
+        self, model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike
+    ) -> str:
+        return f"no fake class capacity for ({gpu.id}, tp {config.tensor_parallel})"
+
+
 def fake_gpu(gpu_id: str) -> GPUSpec:
     return GPUSpec(
         id=gpu_id,
@@ -105,6 +207,9 @@ def fake_row(instance: str, gpu_id: str, gpu_count: int, price: float) -> PriceR
 GPUS = {"fake-a": fake_gpu("fake-a"), "fake-b": fake_gpu("fake-b")}
 ROW_A = fake_row("a-1x", "fake-a", 1, 2.0)
 ROW_B = fake_row("b-8x", "fake-b", 8, 19.0)
+SHAPE_GPUS = {"shape-a": fake_gpu("shape-a"), "shape-b": fake_gpu("shape-b")}
+ROW_SA = fake_row("sa-1x", "shape-a", 1, 1.0)
+ROW_SB = fake_row("sb-1x", "shape-b", 1, 3.0)
 
 
 def stats(demand_rps: float, demand_tps: float = 0.0) -> WorkloadStats:

@@ -129,3 +129,17 @@ def test_usage_log_records_failures_once_the_planner_is_reached(
     assert record["solver_status"] == "infeasible"
     assert record["cost_usd_per_day"] is None
     assert any("Usage log:" in caption.value for caption in at.caption)
+
+
+def test_request_size_classes_default_to_2x2_and_show_the_routing() -> None:
+    at = app()
+    assert at.selectbox(key="classes").value == "2x2"
+    at.selectbox(key="preset").set_value(min(presets.SAMPLE_PRESETS, key=lambda p: p.rows).key)
+    at.multiselect(key="gpu_ids").set_value(["h100-sxm-80gb"])
+    plan(at.run())
+    assert not at.error
+    assert "Request-size routing" in [h.value for h in at.subheader]
+    assert any("Saving from request-size routing" in m.value for m in at.markdown)
+    at.selectbox(key="classes").set_value("1")
+    plan(at.run())
+    assert "Request-size routing" not in [h.value for h in at.subheader]

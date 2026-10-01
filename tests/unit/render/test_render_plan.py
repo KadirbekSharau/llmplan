@@ -84,3 +84,19 @@ def test_plan_json(planned) -> None:  # type: ignore[no-untyped-def]
     assert doc["solver"]["backend"] == "highs"
     assert "solve_time_s" not in doc["solver"]  # wall-clock; kept out of JSON
     assert len(doc["candidates"]) == 2
+    assert doc["classes"] == doc["routing"] == doc["class_binding"] == []
+
+
+def test_plan_text_shows_classes_and_routing() -> None:
+    from tests.acceptance.test_m7 import two_class_request, two_class_workload
+
+    req = two_class_request(two_class_workload())
+    text = render.get("text").plan(req, plan(req))
+    assert "\nClasses\n" in text
+    assert (
+        "      0  1..1,050        0..65             50.0%       5.000        50.0  requests" in text
+    )
+    assert "Routing (share of each class's requests per replica type)" in text
+    assert "      1   100.0%     1.000      5.33  test sb-1x tp1 bf16 seqs4" in text
+    legacy = render.get("text").plan(req, plan(req.model_copy(update={"classes": ()})))
+    assert "Routing" not in legacy

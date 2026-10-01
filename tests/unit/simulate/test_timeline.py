@@ -6,7 +6,7 @@ import pytest
 
 from llmplan.planner.request import SLO
 from llmplan.simulate import SimOptions, Timeline, replay
-from llmplan.simulate.timeline import _step_windows
+from llmplan.simulate.stepfn import step_windows
 from tests.fake_planner import sim_plan, workload
 
 
@@ -14,19 +14,19 @@ def test_step_windows_integral_and_max() -> None:
     # 0 until 1, then 2 until 3, then 0; a zero-length spike to 5 at t=3; window 2 s.
     time_s = np.array([1.0, 3.0, 3.0])
     value = np.array([2.0, 5.0, 0.0])
-    integral, maximum = _step_windows(time_s, value, np.array([0.0, 2.0, 4.0]))
+    integral, maximum = step_windows(time_s, value, np.array([0.0, 2.0, 4.0]))
     assert integral.tolist() == [2.0, 2.0]
     assert maximum.tolist() == [2.0, 5.0]
 
 
 def test_step_windows_carries_state_into_a_window() -> None:
-    integral, maximum = _step_windows(np.array([0.5]), np.array([3.0]), np.array([0.0, 1.0, 2.0]))
+    integral, maximum = step_windows(np.array([0.5]), np.array([3.0]), np.array([0.0, 1.0, 2.0]))
     assert integral.tolist() == [1.5, 3.0]
     assert maximum.tolist() == [3.0, 3.0]
 
 
 def test_step_windows_of_an_idle_replica() -> None:
-    integral, maximum = _step_windows(np.array([]), np.array([]), np.array([0.0, 1.0, 2.0]))
+    integral, maximum = step_windows(np.array([]), np.array([]), np.array([0.0, 1.0, 2.0]))
     assert integral.tolist() == [0.0, 0.0]
     assert maximum.tolist() == [0.0, 0.0]
 
