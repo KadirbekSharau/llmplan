@@ -13,7 +13,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M4 | done | m4-planner, PR #3 (141115e) |
 | M5 | done | m5-simulate, PR #4 (ade5b93) |
 | M6 | done | m6-ui, PR #5 (0f64b0b) |
-| M7 | ready for review | m7-demand-classes |
+| M7 | done | m7-demand-classes, PR #6 (e69d7d0) |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
 
@@ -111,16 +111,22 @@ Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a la
 
 ---
 
+## Release v0.1.0 (2026-10-01)
+
+M0 to M7 merged. Decisions taken at the M7 review:
+- UI default is 2x2 request-size classes; the single-class cost is shown beside it as a
+  comparison. On the bundled samples the class plan costs more because the single-class
+  plan under-provisions (replay at source rate: 20% TTFT misses vs 0%). Present this as
+  "honest sizing", never as a saving.
+- Per-class SLO checks stay; the long-request class's p95 is what users experience.
+
 ## Later (not scheduled; recorded so they are not lost)
 
 - **Per-request-size demand classes.** Scheduled as M7 (docs/milestones/M7_DESIGN.md),
   which also replaces M4's Mélange acceptance target with a brute-force exactness test and a
   same-inputs cross-check against Mélange's solver.
-- **Simulator KV accounting (M7).** The planner assumes mean KV occupancy (input + output/2,
-  matching vLLM's incremental block allocation); the simulator reserves input + output at
-  admission, which is conservative by up to 2x in concurrency when KV binds. M7 makes the
-  simulator grow KV occupancy as tokens are generated. Found during the M5 review.
-- **`llmplan simulate --requests-csv PATH`** to export per-request rows (M7, small).
+- **Suite runtime.** The full suite with coverage is at ~56 s against a 60 s budget; split
+  slow acceptance runs or raise the budget before adding more.
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
 - **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
 
