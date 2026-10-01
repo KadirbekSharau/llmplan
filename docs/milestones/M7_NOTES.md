@@ -202,6 +202,19 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   plans and replays in under 3 s through AppTest (`-m slow -k every_preset`: Azure 2024
   conversation 2.76 s, the slowest), on this laptop while other jobs kept its load average
   near 17 on 8 cores.
+- **Package growth (~1,360 net lines under `llmplan/`).** ARCHITECTURE.md section 1 asks
+  for a justification above ~300 lines: classes (`workload/classes.py`, 316), the planner's
+  class evaluation and routing (`planner/classes.py`, 186), the class formulation and
+  routing LP (~120 in `model.py`, ~75 in `solve.py`), `planner/explain.py` (221, of which
+  ~150 moved out of `planner/__init__.py`, which shrank by ~100), the simulator's
+  class-weighted routing, incremental KV and per-class summaries (~300 across
+  `simulate/`), and the CLI, renderers and UI (~210). Each module keeps one job; only
+  `workload/classes.py` (316) and `simulate/timeline.py` (307) pass 300 lines, slightly.
+- **Test suite time.** `uv run pytest` (coverage on) took 51 to 61 s here across runs, with
+  other jobs holding the load average between 12 and 22 on 8 cores; without coverage it
+  takes about 25 s. M7 adds about 6 s under that load (the exactness test is 1.3 s). On an
+  idle laptop the suite is well inside the 60 s budget; under heavy contention it can brush
+  it.
 
 ## Deviations from the design doc
 
@@ -225,10 +238,45 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
 - **`classify(..., window_s=60.0)`.** The design's signature has no window; class demand
   is measured in peak windows, so their length is a parameter (default: `compute_stats`'s
   60 s). ARCHITECTURE.md section 5 updated.
+- **New interface fields** (ARCHITECTURE.md sections 4 and 5 updated in the commits that
+  added them): `PlanRequest.classes` (where the plan gets its classes; the design does not
+  say), `SimOptions.kv_accounting` (8b), `Timeline.classes` / `ClassSummary` ("timeline
+  gains per-class p95 latency and violations"; summaries over the whole replay, not per
+  window), `RequestLog`'s `class_index` column, `PlanRun.single_class_cost_usd_per_day`
+  (the UI's saving), `ReplicaState`'s KV-in-use line, and the `class_weighted` builder
+  (`routing.class_weighted(...)`, not a registry entry, because the policy needs the plan
+  and each request's class).
+- **The CLI defaults to `--classes 1`; the UI to 2x2.** Section 7 sets the UI default only.
+  See implementation notes, step 4.
+- **`llmplan simulate --routing` defaults to `auto`** (class-weighted for class plans,
+  least-outstanding otherwise) instead of `least_outstanding`, so a class plan is replayed
+  as planned without extra flags; K=1 plans behave as before.
+- **M5 acceptance test 9.4 now passes `SimOptions(kv_accounting="full")`.** Its values hold
+  only under M5's full reservation, and 8b makes incremental accounting the default. The
+  prompt asks for exactly this; the expected values are unchanged.
+- **6.2's synthetic scenarios use TPOT p95 100 ms**, not the UI's 50 ms, at which the L4 is
+  eligible for no bucket and the scenarios would compare only L40S against H100.
+- **6.3 found no saving.** Section 6.3 expects a saving from request-size routing; on the
+  bundled Azure 2024 conversation sample the classes plan costs the same or more (see
+  "Real-trace saving"), which is recorded as measured. It is surfaced in the UI as the
+  design asks, with a caption that the value can be negative.
 
 ## Questions for founder
 
-None yet.
+None. These CTO-decidable items were decided here and are open to review:
+
+- **UI default 2x2.** The design makes 2x2 the UI default, and it is. On the bundled
+  presets it raises the planned cost against M6 for the same inputs (Azure 2024
+  conversation at the default SLO: $44.66 to $83.76/day), because per-class sizing drops
+  the optimism of sizing every replica for the mean request (the replay at full rate shows
+  the single-class fleet missing the TTFT target for 20% of requests). If the launch should
+  show the M6 numbers by default, set `CLASS_CHOICES` to start with `"1"` in
+  `llmplan/ui/presets.py`; the saving line then appears when a visitor picks 2x2.
+- **Per-class SLO strictness.** A class is checked against the SLO at its own token shape
+  (p95 TTFT from its p95 input; TPOT at its mean context), so long-input classes can fail
+  TPOT on GPUs the whole-workload check accepts. This follows the design ("candidates whose
+  SLO fails for a class are ineligible for that class") and Mélange's per-bucket profiles;
+  a mixed batch in vLLM would see a context between the classes'.
 
 ## Acceptance arithmetic
 

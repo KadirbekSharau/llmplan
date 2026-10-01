@@ -53,3 +53,17 @@ All notable changes to this project are documented here. The format follows
   docs/LAUNCH.md. Timeline windows record `vram_bytes_total` (`replay(..., gpus=...)`,
   `llmplan simulate --gpu-catalog`) and the plot's VRAM panel shows weights, KV in use and
   free.
+- M7: request-size demand classes. `llmplan.workload.classify()` (quantile or fixed
+  input x output token bins, classes under 1% merged, demand in the fleet-wide peak
+  windows) and `DemandClass`; `PlanRequest.classes`; the MILP gains per-class allocation
+  variables (milli-replica integers for CP-SAT) with per-class SLO eligibility and
+  estimates at each class's shape, a routing LP over the chosen fleet, and
+  `PlanResult.classes`, `routing` (`RoutingRule`) and `class_binding`; one class
+  reproduces M4 exactly. `llmplan plan --classes`; class and routing tables in the text
+  output. Simulation: `class_weighted` routing (deterministic deficit rule), per-class
+  summaries in the `Timeline`, `class_index` in the request log, incremental KV accounting
+  (default; `kv_accounting="full"` keeps M5's), `llmplan simulate --routing auto
+  --kv-accounting --requests-csv`. Web UI: request-size classes selector (2x2 default),
+  routing table and "saving from request-size routing". Validation: a brute-force
+  exactness test over 50 random instances and `scripts/melange_crosscheck.py` (results in
+  docs/milestones/M7_NOTES.md).
