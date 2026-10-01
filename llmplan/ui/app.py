@@ -27,7 +27,7 @@ from llmplan.perf.uploads import upload_backends
 from llmplan.planner import SLO, PlanRequest, PlanResult
 from llmplan.simulate import SimOptions, Timeline
 from llmplan.types import Commitment
-from llmplan.ui import calibrate, presets, state, usage_log, views, wording
+from llmplan.ui import calibrate, presets, share, state, usage_log, views, wording
 from llmplan.workload import (
     InMemoryTrace,
     Workload,
@@ -92,17 +92,42 @@ def _rewindow(key: str, window_s: float, _run: state.PlanRun, _workload: Workloa
     return state.replay_window(_run, _workload, window_s, _catalogs()[0])
 
 
-def _seed(shipped: tuple[PriceRow, ...]) -> None:
+def _seed(gpus: Mapping[str, GPUSpec], shipped: tuple[PriceRow, ...]) -> list[str]:
     """Default inputs, set before any widget is drawn; every run, because Streamlit drops the
-    state of a widget that the previous run did not draw."""
+    state of a widget that the previous run did not draw. On a session's first run a share
+    link's valid parameters go first (and plan); returns the names of those ignored."""
+    providers = sorted({row.provider for row in shipped})
+    ignored: list[str] = []
+    if "seeded" not in ss:
+        ss["seeded"] = True
+        choices = {
+            **presets.CHOICES,
+            **{"model_choice": presets.MODEL_CHOICES, "gpu_ids": list(gpus)},
+            **{"preset": [p.key for p in presets.PRESETS], "providers": providers},
+        }
+        params = {k: v for k, v in st.query_params.to_dict().items() if k != "layout"}
+        values, ignored = share.decode(params, choices)
+        ss.update(values)
+        ss["run_now"] = bool(values)
     ss.setdefault("compact", st.query_params.get("layout") == "compact")
-    defaults = {
-        **presets.DEFAULTS,
-        "gpu_ids": sorted({row.gpu_id for row in shipped}),
-        "providers": sorted({row.provider for row in shipped}),
-    }
-    for key, value in defaults.items():
+    defaults = {**presets.DEFAULTS, "gpu_ids": sorted({r.gpu_id for r in shipped})}
+    for key, value in {**defaults, "providers": providers}.items():
         ss.setdefault(key, list(value) if isinstance(value, list) else value)
+    return ignored
+
+
+def _fingerprint(table: pd.DataFrame) -> str:
+    """Every input as text, to tell when the inputs changed after the last plan."""
+    keys = (*presets.DEFAULTS, "upload", "bench_upload", *calibrate.RUN_KEYS)
+    return repr([getattr(ss.get(k), "file_id", ss.get(k)) for k in keys]) + table.to_csv()
+
+
+def _share_after_plan() -> tuple[str | None, bool]:
+    """Put the plan's inputs in the page URL; returns the share link and whether the
+    traffic was shareable (an upload is not)."""
+    params, shareable = share.encode(ss.to_dict())
+    st.query_params.from_dict({**params, **({"layout": "compact"} if ss["compact"] else {})})
+    return share.link(st.context.url or "", params), shareable
 
 
 def _apply(values: Mapping[str, Any]) -> None:
@@ -430,16 +455,25 @@ def main() -> None:
         initial_sidebar_state="auto",
     )
     gpus, shipped = _catalogs()
-    _seed(shipped)
+    ignored = _seed(gpus, shipped)
     views.header()
     st.toggle("Compact layout", key="compact", on_change=_remember_layout, help=COMPACT_HELP)
+    if ignored:
+        st.warning(f"Ignored link parameters (unknown or invalid): {', '.join(ignored)}.")
     traffic, table, benchmarks, clicked = _inputs(gpus, shipped)
-    if clicked:
-        ss["outcome"] = _on_plan(traffic, table, benchmarks)
+    inputs = _fingerprint(table)
+    stale = ss.get("outcome", ("",))[0] == "run" and ss.get("planned_inputs") != inputs
+    again = st.empty()  # the main area's copy of Plan while the shown plan is stale
+    clicked |= stale and again.button("Plan again", key="plan_again", type="primary")
+    if clicked or ss.pop("run_now", False):
+        ss["outcome"], ss["planned_inputs"] = _on_plan(traffic, table, benchmarks), inputs
+        ss["share"], stale = _share_after_plan(), False
+        again.empty()
     kind, value = ss.get("outcome", ("none", None))
     if kind == "run" and isinstance(value, state.PlanRun):
         key, workload = ss["plan_key"], ss["plan_workload"]
-        views.results(value, lambda window: _rewindow(key, window, value, workload))
+        rewindow = lambda window: _rewindow(key, window, value, workload)  # noqa: E731
+        views.results(value, rewindow, stale=stale, share=ss["share"])
         calibrate.report()
     elif kind == "error":
         st.error(str(value))

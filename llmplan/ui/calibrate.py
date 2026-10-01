@@ -24,6 +24,7 @@ from llmplan.types import DType
 
 ANCHOR = "calibrate"
 REPORT_KEY = "benchmark_upload"  # session state: the last plan's validated upload
+RUN_KEYS = ("bench_gpu", "bench_tp", "bench_dtype", "bench_version")  # vLLM JSON details
 Rows = tuple[BenchmarkRow, ...]
 
 

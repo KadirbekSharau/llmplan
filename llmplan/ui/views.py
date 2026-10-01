@@ -84,12 +84,15 @@ def stats_caption(workload: Workload, stats: WorkloadStats) -> None:
         st.caption(escape(note))
 
 
-def answer_card(run: state.PlanRun) -> None:
+def answer_card(run: state.PlanRun, *, stale: bool, share: tuple[str | None, bool]) -> None:
     """The answer first: cost per day against the baseline, the fleet in one sentence, the
-    confidence badge and banner (M8), the first replica's vLLM command, the plan JSON."""
+    confidence badge and banner (M8), the first replica's vLLM command, the share link and
+    the plan JSON; a chip when the inputs changed since this plan."""
     result, confidence = run.result, run.result.perf_confidence
     saving, base = result.baseline_saving_pct, result.baseline
     with st.container(border=True):
+        if stale:
+            st.badge("Inputs changed since this plan: plan again", icon=":material/refresh:")
         st.metric(
             "Cost per day",
             wording.usd(result.cost_usd_per_day),
@@ -112,6 +115,14 @@ def answer_card(run: state.PlanRun) -> None:
         alert(escape(f"Performance model: {sentence}"))
         st.caption("vLLM command of the first replica type (every type is in the Fleet tab):")
         st.code(serve_command(run.request.model, result.replicas[0].candidate.config), "bash")
+        url, shareable = share
+        st.caption(
+            ("Share link: opens this page with these inputs and plans them." if url else "")
+            + ("" if url else "The inputs are too long for a share link.")
+            + ("" if shareable else " Uploads are not shareable: it opens with the default preset.")
+        )
+        if url:
+            st.code(url, language=None)
         st.download_button(
             "Download plan JSON",
             data=render.get("json").plan(run.request, result, run.comparison),
@@ -275,9 +286,15 @@ def assumptions_tab(run: state.PlanRun) -> None:
     )
 
 
-def results(run: state.PlanRun, rewindow: Callable[[float], Timeline]) -> None:
+def results(
+    run: state.PlanRun,
+    rewindow: Callable[[float], Timeline],
+    *,
+    stale: bool,
+    share: tuple[str | None, bool],
+) -> None:
     """The answer card, then Fleet | Routing | Timeline | Candidates | Assumptions."""
-    answer_card(run)
+    answer_card(run, stale=stale, share=share)
     wide = st.toggle("Show all columns", key="all_columns", help="Tables show five key columns.")
     fleet, routing, timeline, candidates, assumptions = st.tabs(
         ["Fleet", "Routing", "Timeline", "Candidates", "Assumptions"]
