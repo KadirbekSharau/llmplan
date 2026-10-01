@@ -161,6 +161,8 @@ llmplan/
                          #   SimulationSummary, ClassSummary (M7), window aggregation (numpy)
     stepfn.py            # M7 (moved from timeline): window integrals/maxima of state logs,
                          #   step and piecewise-linear (incremental KV)
+    compare.py           # M8: ClassComparison, compare_single_class (a class plan against the
+                         #   same request sized for the mean request, replayed on the trace)
   render/                # output adapters: text table, JSON, vLLM command line, plots
     __init__.py          # Renderer protocol, register(), get()
     text.py              # M1
@@ -613,6 +615,17 @@ class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
     single_class_cost_usd_per_day: float | None = None   # M7: the request planned without
                                          #   classes (None: no classes, or infeasible);
                                          #   property class_saving_pct
+    single_class_ttft_violation_pct: float | None = None # M8: that fleet replayed on the
+                                         #   traffic; property comparison -> ClassComparison
+
+# llmplan/simulate/compare.py (M8)
+class ClassComparison(BaseModel, frozen=True):
+    class_cost_usd_per_day: float        # gt=0
+    single_class_cost_usd_per_day: float | None   # None: no single-class fleet meets the target
+    single_class_ttft_violation_pct: float | None # replay of the single-class fleet; None: not
+                                         #   replayed (no trace, or no such fleet)
+# compare_single_class(request, result, workload=None, *, options=None, gpus=None)
+#   -> ClassComparison | None   (None when the request has no classes)
 
 # llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
 class SamplePreset(BaseModel, frozen=True):
@@ -662,7 +675,7 @@ no entry points, until an external contributor needs one.
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5). `class_weighted` (M7) needs the plan's routing weights and each request's class, so it is built per replay by `class_weighted(replica_types, rules, request_class) -> Route` rather than registered |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); M8: `plan(PlanRequest, PlanResult, comparison: ClassComparison | None = None)` adds the class/single-class comparison (text: a "Request-size routing" sentence; JSON: a `class_comparison` object, ignored by `load_plan_json`); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
 
 ---
 

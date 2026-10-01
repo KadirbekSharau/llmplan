@@ -4,7 +4,9 @@ Registered on the main app in `llmplan.cli`; errors map to exit codes there (4 i
 5 solver). Workload statistics come from a trace (`--trace`) or from a JSON file
 (`--stats-json`): either the output of `llmplan workload stats --format-out json` or a bare
 `WorkloadStats` object. `--classes` (M7) splits the trace into request-size classes; it
-needs `--trace`, and its default `1` keeps M4's single-class plan.
+needs `--trace`, and its default `1` keeps M4's single-class plan. With classes, the text and
+JSON outputs also compare the plan with the same request sized for the mean request, whose
+fleet is replayed on the trace (M8).
 """
 
 from __future__ import annotations
@@ -23,7 +25,8 @@ from llmplan.errors import ValidationError
 from llmplan.memory.engine import EngineProfile
 from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
 from llmplan.render.vllm_cmd import plan_commands
-from llmplan.workload import WorkloadStats, compute_stats, load_workload
+from llmplan.simulate.compare import compare_single_class
+from llmplan.workload import Workload, WorkloadStats, compute_stats, load_workload
 from llmplan.workload.classes import DemandClass, classify_spec
 
 MAX_STATS_JSON_BYTES = 1_000_000
@@ -64,14 +67,14 @@ def _stats_from_json(path: Path) -> WorkloadStats:
 
 def _demand(
     trace: Path | None, stats_json: Path | None, classes: str
-) -> tuple[WorkloadStats, tuple[DemandClass, ...]]:
+) -> tuple[WorkloadStats, tuple[DemandClass, ...], Workload | None]:
     if trace is not None and stats_json is None:
         workload = load_workload(trace)
-        return compute_stats(workload), classify_spec(workload, classes)
+        return compute_stats(workload), classify_spec(workload, classes), workload
     if stats_json is not None and trace is None:
         if classes.strip() != "1":
             raise ValidationError("--classes needs --trace (classes are cut from the rows)")
-        return _stats_from_json(stats_json), ()
+        return _stats_from_json(stats_json), (), None
     raise ValidationError("pass exactly one of --trace or --stats-json")
 
 
@@ -132,7 +135,7 @@ def plan_command(
     """Cheapest fleet and replica configs that meet peak demand and the latency SLO."""
 
     def produce() -> str:
-        stats, demand_classes = _demand(trace, stats_json, classes)
+        stats, demand_classes, workload = _demand(trace, stats_json, classes)
         catalog = load_gpus(gpu_catalog)
         options = PlanOptions.model_validate(
             {
@@ -163,6 +166,7 @@ def plan_command(
         result = plan(request)
         if fmt == "vllm":
             return plan_commands(request, result)
-        return render.get(fmt).plan(request, result)
+        comparison = compare_single_class(request, result, workload, gpus=catalog)
+        return render.get(fmt).plan(request, result, comparison)
 
     _run(produce)

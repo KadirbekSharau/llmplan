@@ -213,8 +213,9 @@ def load_plan_json(
     """Read the output of `llmplan plan --format json` (or a bare `PlanResult` JSON dump).
 
     Returns the `PlanResult` and the `SLO` recorded under `request.slo`, None when the file
-    has no `request` object. `solver.solve_time_s` is not serialized, so a loaded plan
-    reports 0.0 (also for its baseline). Raises `ValidationError` naming the file for an
+    has no `request` object; an M8 `class_comparison` object is ignored.
+    `solver.solve_time_s` is not serialized, so a loaded plan reports 0.0 (also for its
+    baseline). Raises `ValidationError` naming the file for an
     unreadable, oversized (`max_bytes`, default 50 MB), non-JSON, or non-`PlanResult` file.
     """
     try:
@@ -228,6 +229,7 @@ def load_plan_json(
     if not isinstance(doc, dict):
         raise ValidationError(f"plan file {path} does not hold a JSON object")
     request = doc.pop("request", None)
+    doc.pop("class_comparison", None)  # M8: written next to a class plan; not part of it
     recorded = request.get("slo") if isinstance(request, dict) else None
     try:
         result = PlanResult.model_validate(_with_solve_time(doc))

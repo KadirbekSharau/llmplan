@@ -19,6 +19,7 @@ from llmplan.planner.result import PlanResult
 from llmplan.render import register
 from llmplan.render.timeline_json import timeline_json
 from llmplan.simulate import Timeline
+from llmplan.simulate.compare import ClassComparison
 from llmplan.types import KVDType
 from llmplan.workload import Workload, WorkloadStats
 
@@ -92,10 +93,17 @@ class JsonRenderer:
     def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str:
         return _dumps([row.model_dump(mode="json") for row in rows])
 
-    def plan(self, request: PlanRequest, result: PlanResult) -> str:
+    def plan(
+        self,
+        request: PlanRequest,
+        result: PlanResult,
+        comparison: ClassComparison | None = None,
+    ) -> str:
+        extra = {} if comparison is None else {"class_comparison": comparison.model_dump()}
         return _dumps(
             {
                 **result.model_dump(mode="json"),
+                **extra,
                 "request": {
                     "model": request.model.id,
                     "slo": request.slo.model_dump(mode="json"),

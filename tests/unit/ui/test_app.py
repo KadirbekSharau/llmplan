@@ -141,7 +141,8 @@ def test_request_size_classes_default_to_2x2_and_show_the_routing() -> None:
     plan(at.run())
     assert not at.error
     assert "Request-size routing" in [h.value for h in at.subheader]
-    assert any("Saving from request-size routing" in m.value for m in at.markdown)
+    # M8 section 4 wording; on H100 alone both plans buy one H100
+    assert any("does not change the fleet for this traffic" in m.value for m in at.markdown)
     at.selectbox(key="classes").set_value("1")
     plan(at.run())
     assert "Request-size routing" not in [h.value for h in at.subheader]

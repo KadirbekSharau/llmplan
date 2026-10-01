@@ -15,6 +15,7 @@ import streamlit as st
 from llmplan import render
 from llmplan.perf.confidence import ROOFLINE_CONSTANTS, confidence_sentence
 from llmplan.planner.result import CandidateEval, PlanResult, label
+from llmplan.render.plan_text import baseline_saving, class_comparison_sentence
 from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
 from llmplan.render.vllm_cmd import serve_command
@@ -81,7 +82,11 @@ def answer_card(result: PlanResult) -> None:
     columns = st.columns(3)
     columns[0].metric("Cost per day", _usd(result.cost_usd_per_day))
     columns[1].metric("Baseline per day", _usd(baseline), help="Best single-row fleet")
-    columns[2].metric("Saving", "n/a" if saving is None else f"{saving:.1f}%")
+    columns[2].metric(
+        "Saving",
+        "n/a" if saving is None else baseline_saving(saving).removeprefix("saving "),
+        help="Against the baseline; never shown as a negative percentage",
+    )
     st.markdown(
         f"Binding constraint: **{escape(result.binding)}** · Solver: "
         f"**{escape(result.solver.backend)} {escape(result.solver.status)}**"
@@ -146,25 +151,15 @@ def fleet_and_replicas(run: state.PlanRun) -> None:
         st.code(serve_command(run.request.model, replica.candidate.config), language="bash")
 
 
-def _saving(run: state.PlanRun) -> str:
-    saving, base = run.class_saving_pct, run.single_class_cost_usd_per_day
-    if saving is None or base is None:
-        return "n/a (no fleet without classes meets the target)"
-    return f"{saving:.1f}% (sized for the mean request: {_usd(base)}/day)"
-
-
 def request_size_routing(run: state.PlanRun) -> None:
-    """With request-size classes (M7): the saving against a single-class plan, the class
-    table with each class's replayed TTFT, and the routing weights."""
-    result = run.result
-    if not result.classes:
+    """With request-size classes (M7): the comparison with sizing for the mean request (M8
+    wording), the class table with each class's replayed TTFT, and the routing weights."""
+    result, comparison = run.result, run.comparison
+    if comparison is None:
         return
     st.subheader("Request-size routing")
-    st.markdown(f"Saving from request-size routing: **{escape(_saving(run))}**")
-    st.caption(
-        "Each class is sized at its own request shape, so the saving can be negative when the "
-        "mean request understates the long ones."
-    )
+    st.markdown(f"**{escape(class_comparison_sentence(comparison))}**")
+    st.caption("Each class is sized and checked against the latency target at its own shape.")
     replayed = {c.class_index: c for c in run.timeline.classes}
     st.dataframe(
         pd.DataFrame(
@@ -260,7 +255,7 @@ def downloads(run: state.PlanRun) -> None:
     left, right = st.columns(2)
     left.download_button(
         "Download plan JSON",
-        data=render.get("json").plan(run.request, run.result),
+        data=render.get("json").plan(run.request, run.result, run.comparison),
         file_name="llmplan-plan.json",
         mime="application/json",
     )

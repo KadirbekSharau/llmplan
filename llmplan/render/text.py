@@ -21,6 +21,7 @@ from llmplan.render.plan_text import plan_text
 from llmplan.render.timeline_text import timeline_text
 from llmplan.render.workload_text import workload_stats_text
 from llmplan.simulate import Timeline
+from llmplan.simulate.compare import ClassComparison
 from llmplan.workload import Workload, WorkloadStats
 
 LABEL_WIDTH = 10
@@ -196,8 +197,13 @@ class TextRenderer:
         lines.extend(f"source: {url} (as of {as_of})" for url, as_of in sources)
         return "\n".join(lines) + "\n"
 
-    def plan(self, request: PlanRequest, result: PlanResult) -> str:
-        return plan_text(request, result)
+    def plan(
+        self,
+        request: PlanRequest,
+        result: PlanResult,
+        comparison: ClassComparison | None = None,
+    ) -> str:
+        return plan_text(request, result, comparison)
 
     def timeline(self, timeline: Timeline) -> str:
         return timeline_text(timeline)

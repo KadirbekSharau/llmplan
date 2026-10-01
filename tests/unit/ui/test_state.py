@@ -161,10 +161,19 @@ def test_run_plan_with_classes_routes_by_weight_and_compares() -> None:
     alone = state.run_plan(only_sa, trace, SimOptions(), req.gpus)
     assert alone.single_class_cost_usd_per_day is None
     assert alone.class_saving_pct is None
-    from llmplan.ui import views  # the page's wording of both cases
+    # the page's wording of both cases (M8 section 4)
+    from llmplan.render.plan_text import class_comparison_sentence
 
-    assert views._saving(run) == "33.3% (sized for the mean request: $144.00/day)"
-    assert views._saving(alone).startswith("n/a (no fleet without classes")
+    assert run.single_class_ttft_violation_pct == 0.0
+    assert run.comparison is not None
+    assert class_comparison_sentence(run.comparison).startswith(
+        "Request-size routing saves $48.00/day (33.3%)"
+    )
+    assert alone.comparison is not None
+    assert class_comparison_sentence(alone.comparison).startswith(
+        "No fleet sized for the mean request"
+    )
     legacy = state.run_plan(req.model_copy(update={"classes": ()}), trace, SimOptions(), req.gpus)
     assert legacy.timeline.options.routing == "least_outstanding"
     assert legacy.single_class_cost_usd_per_day is None
+    assert legacy.comparison is None
