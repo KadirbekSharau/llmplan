@@ -12,7 +12,8 @@ from __future__ import annotations
 import hashlib
 import math
 import threading
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 
@@ -256,6 +257,7 @@ def run_plan(
     options: SimOptions,
     gpus: Mapping[str, GPUSpec],
     backends: Mapping[str, PerfBackend] | None = None,
+    progress: Callable[[str, float], None] | None = None,
 ) -> PlanRun:
     """Plan, then replay the workload on the planned fleet with the request's SLO budgets.
 
@@ -264,11 +266,17 @@ def run_plan(
     (`compare_single_class`). When queues make the replay
     run far past the last arrival (more than 200 windows), it is replayed once more with a
     window chosen over the full span. `backends` (M8) carries a session's uploaded benchmark
-    rows to the planner. Runs one at a time per process. Raises whatever `plan` and
-    `replay` raise.
+    rows to the planner. `progress` (M9) is told the seconds of each stage: "estimate" (the
+    plan's wall time less the solver's), "solve" and "replay" (with the single-class
+    comparison). Runs one at a time per process. Raises whatever `plan` and `replay` raise.
     """
+    report = progress or (lambda stage, seconds: None)
     with _RUN_LOCK:
+        started = time.perf_counter()
         result = plan(request, backends=backends)
+        planned = time.perf_counter()
+        report("estimate", planned - started - result.solver.solve_time_s)
+        report("solve", result.solver.solve_time_s)
         comparison = compare_single_class(
             request, result, workload, options=options, gpus=gpus, backends=backends
         )
@@ -279,6 +287,7 @@ def run_plan(
             span = len(timeline.windows) * options.window_s
             wider = options.model_copy(update={"window_s": timeline_window_s(span)})
             timeline = replay(result, workload, slo=request.slo, options=wider, gpus=gpus)
+        report("replay", time.perf_counter() - planned)
     return PlanRun(
         request=request,
         result=result,

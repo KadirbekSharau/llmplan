@@ -1,5 +1,6 @@
-"""Interactive charts and the Timeline tab's helpers (M9): long-form timeline data, thinning
-to 500 windows, the routing bar chart, window choices and the re-windowed replay."""
+"""Interactive charts and the run behind them (M9): long-form timeline data, thinning to
+500 windows, the routing bar chart, window choices, the re-windowed replay, the fleet
+sentence and the stage timings `run_plan` reports for the progress steps."""
 
 from __future__ import annotations
 
@@ -68,3 +69,12 @@ def test_fleet_sentence(run: state.PlanRun) -> None:
     assert sentence == (
         "1 x Fake shape-a (test sa-1x) + 1 x Fake shape-b (test sb-1x) serving 2 replicas"
     )
+
+
+def test_run_plan_reports_each_stage() -> None:
+    trace = two_class_workload()
+    request = two_class_request(trace)
+    stages: dict[str, float] = {}
+    state.run_plan(request, trace, SimOptions(), request.gpus, progress=stages.__setitem__)
+    assert list(stages) == ["estimate", "solve", "replay"]
+    assert all(seconds >= 0 for seconds in stages.values())

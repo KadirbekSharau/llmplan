@@ -1,8 +1,9 @@
 """Words and numbers the web UI shows (M9_DESIGN.md sections 3, 4 and 6).
 
 Currency and durations (milliseconds or seconds, chosen by size), the model summary chip,
-and the fleet in one sentence. Everything is read from library results or models; no
-Streamlit import, so these are unit-tested without a browser.
+the fleet in one sentence, and an error with a "what to change" hint chosen by the
+exception's type (never by parsing its message). Everything is read from library results
+or models; no Streamlit import, so these are unit-tested without a browser.
 """
 
 from __future__ import annotations
@@ -11,9 +12,35 @@ from collections.abc import Mapping
 
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.catalog.models import ModelSpec
+from llmplan.errors import (
+    FetchError,
+    InfeasiblePlan,
+    LLMPlanError,
+    SolverError,
+    WorkloadFormatError,
+)
 from llmplan.memory.kv_cache import kv_bytes_per_token_total
 from llmplan.memory.weights import model_info
 from llmplan.planner import PlanResult
+
+HINTS: tuple[tuple[type[LLMPlanError], str], ...] = (  # first match wins
+    (InfeasiblePlan, "relax the latency target (TTFT, TPOT, utilization) or add GPUs."),
+    (FetchError, "check the Hugging Face id (org/name), or set HF_TOKEN for a gated model."),
+    (
+        WorkloadFormatError,
+        "the trace needs the columns arrival_s (seconds) or timestamp (ISO-8601), input_tokens "
+        "and output_tokens (optionally model, tenant); Azure 2023/2024 and BurstGPT exports are "
+        "recognised by their own headers.",
+    ),
+    (SolverError, "raise the solver time limit under Advanced, or select fewer options."),
+)
+
+
+def error_text(error: LLMPlanError) -> str:
+    """The library's message, then a "What to change" hint for the error's type (none for
+    other types, whose messages already name the field to fix)."""
+    hint = next((text for kind, text in HINTS if isinstance(error, kind)), None)
+    return str(error) if hint is None else f"{error}\n\nWhat to change: {hint}"
 
 
 def usd(value: float | None) -> str:

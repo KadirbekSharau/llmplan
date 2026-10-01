@@ -40,6 +40,7 @@ from llmplan.workload.classes import classify_spec
 from llmplan.workload.synth import parse_distribution
 
 log = logging.getLogger("llmplan.ui")
+STEPS = ("Resolving model", "Loading traffic", "Estimating performance", "Solving", "Replaying")
 ss = st.session_state
 Traffic = Callable[[], Workload]
 COMMITMENTS: tuple[Commitment, ...] = ("on_demand", "reserved_1y", "reserved_3y", "spot")
@@ -81,8 +82,9 @@ def _run(
     _options: SimOptions,
     _gpus: Mapping[str, GPUSpec],
     _rows: calibrate.Rows,
+    _progress: Callable[[str, float], None],
 ) -> state.PlanRun:
-    return state.run_plan(_request, _workload, _options, _gpus, upload_backends(_rows))
+    return state.run_plan(_request, _workload, _options, _gpus, upload_backends(_rows), _progress)
 
 
 @st.cache_data(ttl=3600, max_entries=200, show_spinner=False)
@@ -325,17 +327,25 @@ def _resolve_model(model_id: str) -> ModelSpec:
     return spec
 
 
+def _done(name: str, seconds: float | None) -> None:
+    st.write(f"{name}: {'cached result' if seconds is None else wording.duration(seconds * 1000)}")
+
+
 def _plan(
     traffic: Traffic,
     table: pd.DataFrame,
     benchmarks: calibrate.BenchmarkFile | None,
     seen: dict[str, WorkloadStats],
+    status: Any,
 ) -> state.PlanRun:
     gpus, _ = _catalogs()
+    started = time.perf_counter()
     model = _resolve_model(_model_id())
     rows = calibrate.rows_for_plan(benchmarks, model, gpus)
+    _done(STEPS[0], (resolved := time.perf_counter()) - started)
     workload = traffic()
     stats = seen["stats"] = compute_stats(workload)
+    _done(STEPS[1], time.perf_counter() - resolved)
     request = state.build_request(
         model=model,
         stats=stats,
@@ -355,7 +365,14 @@ def _plan(
     )
     options = state.sim_options(stats)
     key = state.cache_key(request, options, workload, rows)
-    run = _run(key, request, workload, options, gpus, rows)
+    limit = f"time limit {request.options.time_limit_s:g} s"
+    status.update(label=f"Estimating performance, solving ({limit}) and replaying...")
+    timings: dict[str, float] = {}  # stays empty when the run comes from the cache
+    run = _run(key, request, workload, options, gpus, rows, timings.__setitem__)
+    for stage, step in zip(("estimate", "solve", "replay"), STEPS[2:], strict=True):
+        _done(f"{step} ({limit})" if stage == "solve" else step, timings.get(stage))
+    took = wording.duration((time.perf_counter() - started) * 1000)
+    status.update(label=f"Planned in {took}", state="complete")
     ss["plan_key"], ss["plan_workload"] = key, workload  # for the Timeline window selector
     return run
 
@@ -378,13 +395,12 @@ def _on_plan(
     status: str
     result: PlanResult | None = None
     try:
-        with st.spinner("Planning the fleet and replaying the traffic..."):
-            run = _plan(traffic, table, benchmarks, seen)
+        with st.status("Planning...", expanded=False) as progress:
+            run = _plan(traffic, table, benchmarks, seen, progress)
         result, status, outcome = run.result, run.result.solver.status, ("run", run)
-    except InfeasiblePlan as exc:
-        status, outcome = "infeasible", ("error", str(exc))
     except LLMPlanError as exc:
-        status, outcome = "error", ("error", str(exc))
+        status = "infeasible" if isinstance(exc, InfeasiblePlan) else "error"
+        outcome = ("error", wording.error_text(exc))
     except Exception:
         log.exception("plan failed request_id=%s", request_id)
         message = f"Something went wrong (request id {request_id}); it has been logged."
