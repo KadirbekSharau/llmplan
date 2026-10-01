@@ -213,6 +213,12 @@ names BurstGPT and Azure; the secrets scan script in `scripts/` returns zero hit
 
 **9.11 Live HF (manual).** Section 7, recorded in the notes.
 
+## 9b. Carry-over (in scope for M8)
+- The default test suite takes ~80 s against the 60 s budget. Split CI into two jobs: `check`
+  (lint, types, unit + acceptance excluding the Streamlit AppTest suite) and `ui` (AppTest
+  tests, marked `ui`), and move any remaining multi-second tests to `slow`. Target: default
+  local `pytest` under 45 s; record before/after timings in the notes.
+
 ## 10. Allowed dependencies
 None new at runtime.
 
