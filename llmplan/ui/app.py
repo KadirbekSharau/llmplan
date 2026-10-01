@@ -3,9 +3,9 @@ fleet, its vLLM command lines and the utilization timeline.
 
 Run with `llmplan ui` (or `streamlit run llmplan/ui/app.py`). The page holds no planning
 logic: every result comes from `llmplan.*` through `llmplan.ui.state`, and results are
-recomputed only when Plan is clicked. Limits (M6_DESIGN.md section 6): 50 MB uploads checked
-before parsing, a 30 s solver limit, 200,000 simulated requests, and 30 plans per hour per
-session.
+recomputed only when Plan is clicked. Each plan run is logged by `usage_log` when enabled.
+Limits (M6_DESIGN.md section 6): 50 MB uploads checked before parsing, a 30 s solver limit,
+200,000 simulated requests, and 30 plans per hour per session.
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ import streamlit as st
 from llmplan import render
 from llmplan.catalog.hardware import GPUSpec, PriceRow, load_gpus, load_prices
 from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
-from llmplan.errors import LLMPlanError, ValidationError
-from llmplan.planner import SLO, PlanRequest
+from llmplan.errors import InfeasiblePlan, LLMPlanError, ValidationError
+from llmplan.planner import SLO, PlanRequest, PlanResult
 from llmplan.simulate import SimOptions
 from llmplan.types import Commitment, DType
-from llmplan.ui import presets, state, views
+from llmplan.ui import presets, state, usage_log, views
 from llmplan.workload import (
     InMemoryTrace,
     Workload,
@@ -292,11 +292,11 @@ def _resolve_model(model_id: str) -> ModelSpec:
     return spec
 
 
-def _plan(inputs: Inputs) -> state.PlanRun:
+def _plan(inputs: Inputs, seen: dict[str, WorkloadStats]) -> state.PlanRun:
     gpus, _ = _catalogs()
     model = _resolve_model(inputs.model_id)
     workload = inputs.workload()
-    stats = compute_stats(workload)
+    stats = seen["stats"] = compute_stats(workload)
     request = state.build_request(
         model=model,
         stats=stats,
@@ -327,14 +327,37 @@ def _on_plan(inputs: Inputs) -> tuple[str, object]:
             "few minutes before planning again."
         )
     request_id = uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    seen: dict[str, WorkloadStats] = {}
+    outcome: tuple[str, object]
+    status: str
+    result: PlanResult | None = None
     try:
         with st.spinner("Planning the fleet and replaying the traffic..."):
-            return "run", _plan(inputs)
+            run = _plan(inputs, seen)
+        result, status, outcome = run.result, run.result.solver.status, ("run", run)
+    except InfeasiblePlan as exc:
+        status, outcome = "infeasible", ("error", str(exc))
     except LLMPlanError as exc:
-        return "error", str(exc)
+        status, outcome = "error", ("error", str(exc))
     except Exception:
         log.exception("plan failed request_id=%s", request_id)
-        return "error", f"Something went wrong (request id {request_id}); it has been logged."
+        message = f"Something went wrong (request id {request_id}); it has been logged."
+        status, outcome = "error", ("error", message)
+    if "stats" in seen:  # the planner was reached: log the input shapes (section 7)
+        usage_log.append(
+            usage_log.usage_record(
+                request_id=request_id,
+                model_id=inputs.model_id,
+                gpu_ids=inputs.gpu_ids,
+                stats=seen["stats"],
+                slo=inputs.slo,
+                result=result,
+                solver_status=status,
+                duration_s=time.perf_counter() - started,
+            )
+        )
+    return outcome
 
 
 def main() -> None:
@@ -358,6 +381,8 @@ def main() -> None:
         st.warning(str(value))
     else:
         st.info("Choose the inputs in the sidebar, then click Plan.")
+    st.divider()
+    st.caption(usage_log.FOOTER)
 
 
 main()

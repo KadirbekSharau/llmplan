@@ -7,6 +7,7 @@ sample is committed); nothing touches the network.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Iterator
@@ -132,3 +133,34 @@ def test_9_5_price_edit_flows_through() -> None:
     assert not at.error
     assert after > before
     assert after == pytest.approx(10 * before, rel=1e-3)  # rel: metric rounds to cents
+
+
+# 9.6 Usage log: one plan run appends one JSON line with exactly the section 7 fields.
+SECTION_7_FIELDS = {
+    "ts",
+    "request_id",
+    "model_id",
+    "gpu_ids",
+    "n_requests",
+    "peak_rps",
+    "slo",
+    "cost_usd_per_day",
+    "baseline_usd_per_day",
+    "solver_status",
+    "duration_s",
+}
+
+
+def test_9_6_usage_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("LLMPLAN_USAGE_LOG", str(path))
+    at = preset_session(H100, "l4-24gb")
+    plan(at)
+    assert not at.error
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+    assert set(record) == SECTION_7_FIELDS
+    assert record["model_id"] == "fixture:llama3-8b"
+    assert record["gpu_ids"] == [H100, "l4-24gb"]
+    assert record["cost_usd_per_day"] == pytest.approx(cost_per_day(at), abs=0.005)
+    assert record["solver_status"] == "optimal"

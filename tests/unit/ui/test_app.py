@@ -3,6 +3,7 @@ model id errors, the plan brake, and unexpected errors. Headless and offline (Ap
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -110,3 +111,20 @@ def test_every_preset_plans_under_60_s_with_default_inputs(chosen: presets.Trace
     print(f"preset {chosen.key}: {elapsed:.2f} s")
     assert not at.error
     assert elapsed < PLAN_TIMEOUT_S
+
+
+def test_usage_log_records_failures_once_the_planner_is_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("LLMPLAN_USAGE_LOG", str(path))
+    at = app()
+    at.number_input(key="ttft").set_value(1.0)
+    plan(at.run())
+    at.selectbox(key="model_choice").set_value("Other Hugging Face id")
+    plan(at.run())  # no model id: the planner is never reached, nothing is logged
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+    assert record["solver_status"] == "infeasible"
+    assert record["cost_usd_per_day"] is None
+    assert any("Usage log:" in caption.value for caption in at.caption)
