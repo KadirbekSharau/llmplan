@@ -55,7 +55,8 @@ small, readable, and safe.
   formats, performance backends, solver backends, output renderers. Adding one is a new
   file plus a registration line; nothing else changes.
 - The planner core is a library. The CLI and the web UI are thin adapters over it. Nothing
-  in the core imports Streamlit, argparse, or matplotlib.
+  in the core imports Streamlit, argparse, or matplotlib (only `render/plots.py` does, and
+  it is imported lazily by the CLI).
 - Data flows through immutable models, so stages can run in parallel or be cached by hash
   of their inputs later without redesign.
 
@@ -143,8 +144,12 @@ llmplan/
     baseline.py          # best homogeneous fleet by enumeration (no solver)
     result.py            # CandidateEval, ReplicaPlan, FleetItem, SolverInfo, PlanResult
   simulate/              # M5
-    replay.py
-    timeline.py
+    __init__.py          # replay(), replay_requests() (M5 public API)
+    replica.py           # ReplicaSpec from a planned candidate, ReplicaState (slots, KV, queue)
+    events.py            # heap-based event loop, RequestLog, per-replica step logs
+    routing.py           # routing policy registry: least_outstanding, round_robin
+    timeline.py          # SimOptions, Timeline, WindowRecord, ReplicaWindowRecord,
+                         #   SimulationSummary, window aggregation (numpy)
   render/                # output adapters: text table, JSON, vLLM command line, plots
     __init__.py          # Renderer protocol, register(), get()
     text.py              # M1
@@ -152,11 +157,15 @@ llmplan/
     workload_text.py     # M2 `workload stats` text (moved from cli_workload.py in M4)
     plan_text.py         # M4 `plan` text
     vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
+    timeline_text.py     # M5 `simulate` text
+    timeline_json.py     # M5 `simulate` JSON
+    plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png)
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
   cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
   cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
+  cli_simulate.py        # M5: `llmplan simulate` command, registered in cli.py
   ui/                    # Streamlit app; thin (M6)
 data/
   gpus.yaml
@@ -450,8 +459,71 @@ class PlanResult(BaseModel, frozen=True):
     assumptions: tuple[str, ...]
 ```
 
-Later milestones add `Timeline` following the same conventions. Its fields are specified in
-its design doc and copied here when merged.
+```python
+# llmplan/planner/result.py (M5): load_plan_json(path, *, max_bytes=50 MB)
+#   -> tuple[PlanResult, SLO | None]   reads `llmplan plan --format json` output; the SLO is
+#   request.slo (None for a bare PlanResult dump); solve_time_s (not serialized) loads as 0.0
+
+# llmplan/simulate/timeline.py (M5)
+class SimOptions(BaseModel, frozen=True):
+    window_s: float = 60.0               # gt=0, finite
+    routing: Literal["least_outstanding", "round_robin"] = "least_outstanding"
+    max_requests: int = 500_000          # trace is truncated (with a note) beyond this
+    seed: int = 0                        # reserved for tie-breaking (unused: ties are by index)
+    ttft_budget_ms: float | None = None  # defaults to slo.ttft_ms_p95 when given
+    tpot_budget_ms: float | None = None
+
+class ReplicaWindowRecord(BaseModel, frozen=True):
+    replica_index: int
+    utilization: float                   # busy slot-seconds / (slots * window_s), 0..1
+    kv_tokens_in_use_mean: int           # time-weighted over the window, rounded
+    kv_tokens_in_use_max: int
+    kv_bytes_in_use_max: int             # summed over the replica's GPUs
+    weight_bytes: int                    # summed over the replica's GPUs
+    queue_depth_mean: float
+    queue_depth_max: int
+    requests_started: int
+    requests_completed: int
+
+class WindowRecord(BaseModel, frozen=True):
+    index: int
+    start_s: float
+    arrivals: int
+    completions: int
+    demand_rps: float                    # arrivals / window_s
+    capacity_rps: float                  # from the plan (derated), constant
+    ttft_ms_p95: float | None            # over requests completed in this window
+    e2e_ms_p95: float | None
+    ttft_violations: int
+    tpot_violations: int
+    replicas: tuple[ReplicaWindowRecord, ...]
+
+class SimulationSummary(BaseModel, frozen=True):
+    n_requests: int                      # simulated (after truncation)
+    n_truncated: int
+    ttft_ms_p50: float
+    ttft_ms_p95: float
+    tpot_ms_p95: float
+    e2e_ms_p95: float
+    ttft_violation_pct: float
+    tpot_violation_pct: float
+    mean_utilization: float              # across replicas and windows
+    max_queue_depth: int
+
+class Timeline(BaseModel, frozen=True):  # no wall-clock fields: JSON is byte-identical
+    plan_cost_usd_per_day: float
+    options: SimOptions                  # budgets resolved against the SLO
+    windows: tuple[WindowRecord, ...]    # from the first arrival until the last completion
+    summary: SimulationSummary
+    assumptions: tuple[str, ...]
+
+# llmplan/simulate/events.py (M5)
+class RequestLog(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    frame: pd.DataFrame                  # one row per simulated request, trace order:
+                                         #   arrival_s, start_s, complete_s (float64 s),
+                                         #   ttft_ms, tpot_ms, e2e_ms (float64 ms),
+                                         #   replica_index, kv_tokens (int64)
+```
 
 ---
 
@@ -468,7 +540,8 @@ Downstream code calls only these.
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
-| M5 | `llmplan.simulate.replay` | `(PlanResult, Workload) -> Timeline` |
+| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None) -> Timeline` (window length lives in `options`) |
+| M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
 
 ---
 
@@ -484,7 +557,8 @@ no entry points, until an external contributor needs one.
 | Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(path, *, max_bytes) -> Workload`; `detect(path) -> str` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member |
+| Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)`, a plain function for the binary PNG output (`llmplan simulate --png`) |
 
 ---
 

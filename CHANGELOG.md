@@ -34,3 +34,11 @@ All notable changes to this project are documented here. The format follows
   relaxation; `vllm serve` command lines per replica; CLI command `llmplan plan`.
   `llmplan perf estimate --trace` now computes statistics from a trace, and the workload
   stats renderers moved into `llmplan.render` (output unchanged).
+- M5: trace replay and timeline. `llmplan.simulate.replay()` runs a heap-based
+  discrete-event simulation of a workload on a `PlanResult`'s fleet (slots from the perf
+  estimate, KV-token admission from the M1 fit, per-replica FIFO queues, `least_outstanding`
+  or `round_robin` routing) and returns a `Timeline` of per-window demand, utilization, KV
+  in use, queue depth, latency p95s and SLO violations with a summary;
+  `replay_requests()` gives the per-request records. `load_plan_json()` reads `llmplan plan
+  --format json` output. Four-panel PNG (matplotlib, Agg), text and JSON renderers; CLI
+  command `llmplan simulate`. The M3 acceptance tests import the real `WorkloadStats`.

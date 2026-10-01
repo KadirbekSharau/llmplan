@@ -17,7 +17,9 @@ from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import PlanResult
 from llmplan.render import register
 from llmplan.render.plan_text import plan_text
+from llmplan.render.timeline_text import timeline_text
 from llmplan.render.workload_text import workload_stats_text
+from llmplan.simulate import Timeline
 from llmplan.workload import Workload, WorkloadStats
 
 LABEL_WIDTH = 10
@@ -194,3 +196,6 @@ class TextRenderer:
 
     def plan(self, request: PlanRequest, result: PlanResult) -> str:
         return plan_text(request, result)
+
+    def timeline(self, timeline: Timeline) -> str:
+        return timeline_text(timeline)

@@ -20,12 +20,13 @@ if TYPE_CHECKING:
     from llmplan.perf.estimate import PerfEstimate, StatsLike
     from llmplan.planner.request import PlanRequest
     from llmplan.planner.result import PlanResult
+    from llmplan.simulate import Timeline
     from llmplan.workload import Workload, WorkloadStats
 
 
 class Renderer(Protocol):
     """Formats the results of each command (`fit`, `model-info`, `gpus`, `workload stats`,
-    `perf ...`, `plan`)."""
+    `perf ...`, `plan`, `simulate`)."""
 
     def fit(self, request: FitRequest, result: FitResult) -> str: ...
 
@@ -47,6 +48,8 @@ class Renderer(Protocol):
     def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str: ...
 
     def plan(self, request: PlanRequest, result: PlanResult) -> str: ...
+
+    def timeline(self, timeline: Timeline) -> str: ...
 
 
 _REGISTRY: dict[str, Renderer] = {}

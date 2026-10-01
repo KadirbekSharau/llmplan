@@ -11,7 +11,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M2 | done | m2-workload, PR #2 (4c6621b) |
 | M3 | done | m3-perf, PR #1 (6675804) |
 | M4 | done | m4-planner, PR #3 (141115e) |
-| M5 | in progress | m5-simulate |
+| M5 | ready for review | m5-simulate |
 | M6 | designed | m6-ui |
 | M7 | drafted (after M6) | m7-demand-classes |
 
@@ -118,8 +118,6 @@ Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a la
   same-inputs cross-check against Mélange's solver.
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
 - **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
-- **Stale marker.** `tests/acceptance/test_m3.py` still carries a `TODO(M2)` for importing
-  the real `WorkloadStats`; M5 should replace the local copy with the M2 model.
 
 ## Dependencies
 

@@ -3,20 +3,27 @@
 `FakeBackend` is registered in the M3 perf registry under `"fake"`. It returns fixed
 capacities per `(gpu_id, tensor_parallel)` from `FAKE_PERF`, which tests fill through the
 `fake_perf` fixture (tests/conftest.py) so entries never leak between tests. Fake GPUs
-have 10 TB of VRAM so every candidate fits (fit itself is the real M1 code).
+have 10 TB of VRAM so every candidate fits (fit itself is the real M1 code). `sim_plan`
+builds the M5 test plans: exact service times and, optionally, a small KV cache.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+
+import numpy as np
+import pandas as pd
 
 from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec, load_model
 from llmplan.memory.engine import EngineProfile
 from llmplan.perf import PerfEstimate, ReplicaConfig, StatsLike, register
+from llmplan.planner import plan
 from llmplan.planner.request import SLO, PlanOptions, PlanRequest
-from llmplan.workload import WorkloadStats
+from llmplan.planner.result import PlanResult
+from llmplan.workload import Workload, WorkloadStats
 
 AS_OF = date(2026, 9, 30)
 SOURCE = "https://example.com/test-only"
@@ -29,6 +36,7 @@ class FakePerf:
     tokens_per_s: float = 1000.0
     ttft_ms_p95: float = 100.0
     tpot_ms_p95: float = 10.0
+    prefill_tokens_per_s: float = 10_000.0
 
 
 FAKE_PERF: dict[tuple[str, int], FakePerf] = {}
@@ -49,7 +57,7 @@ class FakeBackend:
             confidence="measured",
             effective_batch=config.max_num_seqs,
             decode_tokens_per_s=spec.tokens_per_s,
-            prefill_tokens_per_s=10_000.0,
+            prefill_tokens_per_s=spec.prefill_tokens_per_s,
             requests_per_s_capacity=spec.rps,
             ttft_ms_p50=spec.ttft_ms_p95 / 2,
             ttft_ms_p95=spec.ttft_ms_p95,
@@ -150,4 +158,73 @@ def request(
         options=PlanOptions.model_validate(opts),
         gpus=GPUS,
         prices=rows,
+    )
+
+
+def sim_plan(
+    *,
+    replicas: int = 1,
+    effective_batch: int = 1,
+    prefill_tokens_per_s: float = 1000.0,
+    tpot_ms: float = 10.0,
+    kv_token_capacity: int | None = None,
+) -> PlanResult:
+    """A planned fleet of `replicas` identical replicas on row A (1 GPU per instance).
+
+    Planned with the fake backend (`effective_batch = max_num_seqs`, `tpot_ms_p50 =
+    tpot_ms_p95 / 2`), then the replica count and optionally the KV capacity are set.
+    """
+    key = ("fake-a", 1)
+    previous = FAKE_PERF.get(key)
+    FAKE_PERF[key] = FakePerf(
+        rps=1.0, tpot_ms_p95=2 * tpot_ms, prefill_tokens_per_s=prefill_tokens_per_s
+    )
+    try:
+        result = plan(request(1.0, (ROW_A,), max_num_seqs_choices=(effective_batch,)))
+    finally:
+        if previous is None:
+            del FAKE_PERF[key]
+        else:
+            FAKE_PERF[key] = previous
+    (replica,) = result.replicas
+    candidate = replica.candidate
+    if kv_token_capacity is not None:
+        assert candidate.fit is not None
+        fit = candidate.fit.model_copy(update={"kv_token_capacity": kv_token_capacity})
+        candidate = candidate.model_copy(update={"fit": fit})
+    (item,) = result.fleet
+    return result.model_copy(
+        update={
+            "replicas": (
+                replica.model_copy(
+                    update={"candidate": candidate, "count": replicas, "instances": replicas}
+                ),
+            ),
+            "fleet": (
+                item.model_copy(
+                    update={"instances": replicas, "usd_per_day": item.usd_per_day * replicas}
+                ),
+            ),
+            "cost_usd_per_day": result.cost_usd_per_day * replicas,
+            "capacity_rps": result.capacity_rps * replicas,
+        }
+    )
+
+
+def workload(arrivals: Sequence[float], input_tokens: int, output_tokens: int) -> Workload:
+    """A trace of identical requests at the given arrival times (first must be 0.0)."""
+    n = len(arrivals)
+    return Workload(
+        source="test",
+        format="synthetic",
+        frame=pd.DataFrame(
+            {
+                "arrival_s": np.asarray(arrivals, dtype=np.float64),
+                "input_tokens": np.full(n, input_tokens, dtype=np.int64),
+                "output_tokens": np.full(n, output_tokens, dtype=np.int64),
+                "model": pd.Series(pd.NA, index=pd.RangeIndex(n), dtype="string"),
+                "tenant": pd.Series(pd.NA, index=pd.RangeIndex(n), dtype="string"),
+            }
+        ),
+        dropped_rows=0,
     )

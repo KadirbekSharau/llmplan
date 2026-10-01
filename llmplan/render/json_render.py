@@ -17,6 +17,8 @@ from llmplan.perf.estimate import INPUT_STAT_FIELDS, OUTPUT_STAT_FIELDS, PerfEst
 from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import PlanResult
 from llmplan.render import register
+from llmplan.render.timeline_json import timeline_json
+from llmplan.simulate import Timeline
 from llmplan.types import KVDType
 from llmplan.workload import Workload, WorkloadStats
 
@@ -103,3 +105,6 @@ class JsonRenderer:
                 },
             }
         )
+
+    def timeline(self, timeline: Timeline) -> str:
+        return timeline_json(timeline)
