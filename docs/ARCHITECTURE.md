@@ -124,7 +124,8 @@ llmplan/
     __init__.py          # load_workload() (M2 public API)
     schema.py            # Workload, Distribution, WorkloadStats
     formats/             # registry: csv (generic_csv.py), azure2023/azure2024 (azure.py),
-                         #   burstgpt; reader.py = chunked parsing + row validation
+                         #   burstgpt; reader.py = chunked parsing + row validation,
+                         #   InMemoryTrace (M6 uploads, never written to disk)
     stats.py             # compute_stats(): peak windows, token percentiles, diurnal
     synth.py             # deterministic synthetic generator
     fetch.py             # consented, checksum-verified public trace download
@@ -538,7 +539,7 @@ Downstream code calls only these.
 | M1 (implemented) | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
 | M1 (implemented) | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
 | M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
-| M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 200 MB cap) |
+| M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path \| InMemoryTrace, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 50 MB cap; `InMemoryTrace(name, data)`, added in M6, parses an upload from memory so it is never written to disk) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
@@ -556,7 +557,7 @@ no entry points, until an external contributor needs one.
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
 | Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
-| Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(path, *, max_bytes) -> Workload`; `detect(path) -> str` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
+| Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(source, *, max_bytes) -> Workload`; `detect(source) -> str` (`source` is a `Path` or, since M6, an `InMemoryTrace`) | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5) |
