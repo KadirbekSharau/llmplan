@@ -16,3 +16,4 @@ answer in the next milestone.
 Rule (founder, 2026-09-30): only log questions the CTO genuinely cannot decide. Obvious or
 CTO-decidable items are decided and noted in the milestone notes instead.
 | 7 | 2026-10-01 | PyPI publication needs a PyPI account and either an API token or trusted-publishing setup for the `llmplan` project; only the founder can create these. | M8 prepares the release workflow and instructions; first publish waits for the founder's PyPI setup. | |
+| 8 | 2026-10-01 | SECURITY.md lists the git author address sharaukadr2001@gmail.com as the vulnerability contact (it is already public in every commit). Keep, or switch to another address / GitHub private reporting only? | Kept as is. | |

@@ -14,7 +14,7 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M5 | done | m5-simulate, PR #4 (ade5b93) |
 | M6 | done | m6-ui, PR #5 (0f64b0b) |
 | M7 | done | m7-demand-classes, PR #6 (e69d7d0) |
-| M8 | ready for review (launch readiness, v0.2.0) | m8-launch |
+| M8 | done | m8-launch, PR #8 (66a3d06); released as v0.2.0 |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
 
