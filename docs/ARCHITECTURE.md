@@ -44,7 +44,7 @@ small, readable, and safe.
 - Hugging Face fetches go only to `https://huggingface.co/<org>/<name>/resolve/<rev>/config.json`
   with `org`/`name`/`rev` validated against `^[A-Za-z0-9._-]+$`. Optional token is read from
   the environment (`HF_TOKEN`), never from a file we write, never logged.
-- Uploaded traces are size-capped (default 200 MB), parsed with an explicit column schema,
+- Uploaded traces are size-capped (50 MB in the web UI, checked before parsing; never written to disk), parsed with an explicit column schema,
   and never executed or templated.
 - No secrets in the repo. `data/` contains only public catalog data with source URLs.
 - Dependencies pinned in `uv.lock`; `pip-audit` (or `uv audit`) runs in CI.
@@ -167,13 +167,22 @@ llmplan/
   cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
   cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
   cli_simulate.py        # M5: `llmplan simulate` command, registered in cli.py
-  ui/                    # Streamlit app; thin (M6)
+  cli_ui.py              # M6: `llmplan ui` (Streamlit bootstrap in-process; lazy import)
+  ui/                    # M6: Streamlit app; thin. Only app.py and views.py import streamlit
+    app.py               # the page: sidebar inputs, one Plan button, last outcome (< 400 lines)
+    views.py             # result sections rendered from library results
+    state.py             # pure helpers: PlanRequest from inputs, PriceRow validation of the
+                         #   edited table, cache key, run_plan (plan + replay), window, brake
+    presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits
+    usage_log.py         # opt-in JSON-lines usage log (LLMPLAN_USAGE_LOG)
 data/
   gpus.yaml
   prices.yaml
   benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
-  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (data files never committed)
+  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (full data files never committed)
+  traces/samples/        # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
+scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -528,6 +537,32 @@ class RequestLog(BaseModel, frozen=True, arbitrary_types_allowed=True):
                                          #   replica_index, kv_tokens (int64)
 ```
 
+```python
+# llmplan/workload/formats/reader.py (M6)
+@dataclass(frozen=True)
+class InMemoryTrace:                     # an upload parsed without touching the disk
+    name: str                            # labels messages and Workload.source
+    data: bytes                          # never in repr/str
+
+# llmplan/ui/state.py (M6)
+class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
+    request: PlanRequest
+    result: PlanResult
+    timeline: Timeline
+
+# llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
+class SamplePreset(BaseModel, frozen=True):
+    key: str; label: str
+    filename: str                        # under data/traces/samples/, generic csv
+    rows: int                            # gt=0
+    source_url: str
+class SyntheticPreset(BaseModel, frozen=True):
+    key: str; label: str
+    rate_rps: float; duration_s: float   # gt=0
+    input_tokens: Distribution; output_tokens: Distribution
+    seed: int = 0
+```
+
 ---
 
 ## 5. Public API per milestone
@@ -545,6 +580,7 @@ Downstream code calls only these.
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
 | M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`) |
 
 ---
 

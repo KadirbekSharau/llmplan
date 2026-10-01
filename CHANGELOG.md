@@ -42,3 +42,14 @@ All notable changes to this project are documented here. The format follows
   `replay_requests()` gives the per-request records. `load_plan_json()` reads `llmplan plan
   --format json` output. Four-panel PNG (matplotlib, Agg), text and JSON renderers; CLI
   command `llmplan simulate`. The M3 acceptance tests import the real `WorkloadStats`.
+- M6: Streamlit web UI (`llmplan ui`, `llmplan/ui/`): model picker (fixtures and Hugging
+  Face ids), traffic from bundled public trace samples, a CSV upload (50 MB, parsed in
+  memory via the new `InMemoryTrace`) or synthetic traffic, SLO inputs, an editable price
+  table validated through `PriceRow`, and results with the answer card, fleet and replica
+  tables, `vllm serve` lines, the replay timeline, candidates, assumptions and JSON
+  downloads; per-session plan brake and an opt-in anonymous usage log
+  (`LLMPLAN_USAGE_LOG`). Five CC-BY-4.0 trace samples in `data/traces/samples/` cut by
+  `scripts/make_samples.py`; `scripts/usage_summary.py`; Dockerfile, docs/DEPLOY.md and
+  docs/LAUNCH.md. Timeline windows record `vram_bytes_total` (`replay(..., gpus=...)`,
+  `llmplan simulate --gpu-catalog`) and the plot's VRAM panel shows weights, KV in use and
+  free.

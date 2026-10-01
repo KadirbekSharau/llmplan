@@ -4,9 +4,9 @@ CPU-only planner for self-hosted LLM inference: given a model, traffic, a latenc
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
 
-Status: M1 to M5 implemented (model and GPU/price catalogs with exact VRAM fit, workload
+Status: M1 to M6 implemented (model and GPU/price catalogs with exact VRAM fit, workload
 ingestion, performance model, MILP fleet planner, trace replay with a utilization
-timeline). Documents drive the work:
+timeline, and a Streamlit web UI). Documents drive the work:
 
 - [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
@@ -15,6 +15,8 @@ timeline). Documents drive the work:
 - [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) — rules every milestone must satisfy
 - [docs/FOUNDER_QUESTIONS.md](docs/FOUNDER_QUESTIONS.md) — decisions waiting on the founder
 - [docs/CTO_ASSESSMENT.md](docs/CTO_ASSESSMENT.md) — background reasoning (optional reading)
+- [docs/DEPLOY.md](docs/DEPLOY.md) — hosting the web UI (Docker, Streamlit Community Cloud)
+- [docs/LAUNCH.md](docs/LAUNCH.md) — launch checklist and draft posts
 
 Implementing agents: start with PLAN.md, then ARCHITECTURE.md, then your milestone's design doc.
 
@@ -25,6 +27,25 @@ From a checkout (catalogs and fixtures are read from `data/`):
 ```
 uv sync
 ```
+
+**`llmplan ui`** — the web UI: pick a model (a shipped fixture or a Hugging Face id), traffic
+(a bundled public trace sample, an uploaded CSV up to 50 MB, or synthetic), a p95
+TTFT/TPOT target and GPU prices (editable), click Plan, and get the cheapest fleet, a
+`vllm serve` line per replica, the utilization timeline of a replay, every candidate with
+its reason, the assumptions, and JSON downloads. Nothing recomputes until Plan is clicked.
+
+```
+uv run llmplan ui
+```
+
+Options: `--port 8501`, `--address localhost` (`0.0.0.0` in a container), `--headless`
+(do not open a browser). It needs no secrets; `HF_TOKEN` (optional) is read server-side for
+gated models, and `LLMPLAN_USAGE_LOG=PATH` enables the anonymous usage log (fields listed in
+the page footer and docs/DEPLOY.md). Limits: 50 MB uploads (refused before parsing), a 30 s
+solver time limit, 200,000 simulated requests, 30 plans per hour per session. The presets
+are samples of the Azure 2023/2024 and BurstGPT traces in `data/traces/samples/` (CC-BY-4.0;
+see its README). Docker: `docker build -t llmplan . && docker run --rm -p 8501:8501
+llmplan`; hosting steps in docs/DEPLOY.md.
 
 **`llmplan fit`** — does a model fit on a GPU at a tensor-parallel degree, and how many
 full-context sequences fit in the remaining KV cache? A non-fit is an answer (exit 0).
@@ -162,7 +183,12 @@ uv sync --locked
 uv run ruff check . && uv run ruff format --check .
 uv run mypy --strict llmplan
 uv run pytest            # includes coverage (fails under 90%)
-uv run pytest -m slow --no-cov   # performance test (200k-request replay), excluded by default
+uv run pytest -m slow --no-cov   # 200k-request replay and every UI preset, excluded by default
+uv run pytest -m docker --no-cov # docker build (M6 9.7), excluded by default; skipped without Docker
 uv audit
 uv build
 ```
+
+The web UI tests run headless and offline with `streamlit.testing.v1.AppTest`. The bundled
+trace samples are regenerated with `uv run python scripts/make_samples.py TRACES_DIR` from
+the full traces (`llmplan traces fetch NAME --dest TRACES_DIR --yes`, outside the repo).
