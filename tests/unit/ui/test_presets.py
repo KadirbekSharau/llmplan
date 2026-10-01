@@ -82,3 +82,19 @@ def test_models_are_listed_by_family_and_defaults_fit_their_bounds() -> None:
     for key, choices in presets.CHOICES.items():
         default = presets.DEFAULTS[key]
         assert set(default if isinstance(default, list) else [default]) <= set(choices)
+
+
+def test_example_scenarios_set_known_inputs_to_valid_values() -> None:
+    """M9 section 3: each example writes inputs the page has, with values its widgets take."""
+    from llmplan.catalog.hardware import load_gpus
+
+    assert len(presets.SCENARIOS) == 2
+    for inputs in presets.SCENARIOS.values():
+        assert set(inputs) <= set(presets.DEFAULTS)
+        for key, value in inputs.items():
+            if key in presets.CHOICES:
+                assert value in presets.CHOICES[key]
+            if key in presets.BOUNDS and value is not None:
+                low, high = presets.BOUNDS[key]
+                assert low <= value <= high
+        assert set(inputs.get("gpu_ids", ())) <= set(load_gpus())  # type: ignore[arg-type]

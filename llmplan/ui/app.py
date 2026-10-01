@@ -381,8 +381,8 @@ def main() -> None:
     elif kind in ("error", "warning"):
         (st.error if kind == "error" else st.warning)(str(value))
     else:
-        st.info(
-            f"Choose the inputs {'above' if ss['compact'] else 'in the sidebar'}, then click Plan."
+        views.empty_state(
+            bool(ss["compact"]), lambda example: _set(_defaults(shipped) | example, run=True)
         )
     views.footer()
 

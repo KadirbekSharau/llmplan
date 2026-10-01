@@ -21,7 +21,7 @@ from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
 from llmplan.render.vllm_cmd import serve_command
 from llmplan.simulate import Timeline
-from llmplan.ui import calibrate, state, usage_log
+from llmplan.ui import calibrate, presets, state, usage_log
 from llmplan.workload import Workload, WorkloadStats
 
 PAGE_TITLE = "llmplan — GPU fleet planner for LLM inference"
@@ -74,6 +74,20 @@ def stats_caption(workload: Workload, stats: WorkloadStats) -> None:
     )
     for note in workload.notes:
         st.caption(escape(note))
+
+
+def empty_state(compact: bool, on_example: Callable[[dict[str, object]], None]) -> None:
+    """Before the first plan: what the page does, and the example scenarios (each plans)."""
+    st.markdown(
+        "**llmplan sizes a self-hosted LLM deployment.** Give it a model, your traffic and a "
+        "latency target, and it picks the cheapest GPU fleet and vLLM settings, then replays "
+        "the traffic on that fleet to show the target holds."
+    )
+    st.info(f"Choose the inputs {'above' if compact else 'in the sidebar'}, then click Plan.")
+    st.caption("Or start from an example:")
+    columns = st.columns(len(presets.SCENARIOS))
+    for i, (label, inputs) in enumerate(presets.SCENARIOS.items()):
+        columns[i].button(label, key=f"example_{i}", on_click=on_example, args=(inputs,))
 
 
 def _download(label: str, data: Any, name: str, where: Any = st) -> None:

@@ -194,3 +194,20 @@ OPTION_KEYS = (
     *("gpu_ids", "providers", "tensor_parallel", "dtypes", "max_num_seqs", "max_model_len"),
     *("perf_backend", "solver", "time_limit_s"),
 )
+# Example scenarios of the empty state (M9 section 3): inputs set over DEFAULTS, then planned.
+SCENARIOS: dict[str, dict[str, object]] = {
+    "Llama 3.1 8B chat on cheap GPUs": {  # Llama-3.1-8B integers; a mixed L40S + L4 fleet
+        "preset": "azure2023-conv",
+        "tpot": 100.0,
+        "gpu_ids": ["a10g-24gb", "l4-24gb", "l40s-48gb"],
+    },
+    "Qwen3-30B-A3B document processing": {  # long inputs, short answers, no latency target
+        "model_choice": f"{FIXTURE_PREFIX}qwen3-30b-a3b",
+        "traffic_mode": TRAFFIC_MODES[2],
+        "syn_rate": 1.0,
+        "syn_in": "lognormal:8.0:0.6:1:6000",
+        "syn_out": "lognormal:5.0:0.6:1:1000",
+        "ttft": None,
+        "tpot": None,
+    },
+}
