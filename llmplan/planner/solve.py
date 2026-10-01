@@ -3,7 +3,8 @@
 Every solve is single-threaded with an explicit seed, time limit, and zero relative gap, so
 the same inputs give the same answer (M4_DESIGN.md section 6). `highs` and `cp_sat` ship
 with OR-Tools; `scip` and `gurobi` are used only when MathOpt can run them. The LP
-relaxation that explains the binding constraint is always solved with GLOP.
+relaxation that explains the binding constraint, and the M7 routing LP over a fixed
+fleet, are always solved with GLOP.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import datetime
 import functools
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -18,7 +20,8 @@ from ortools.math_opt.python import mathopt
 from ortools.math_opt.solvers import highs_pb2
 
 from llmplan.errors import InfeasiblePlan, SolverError
-from llmplan.planner.model import Formulation
+from llmplan.planner.candidates import Column
+from llmplan.planner.model import Formulation, build_balance
 
 SOLVERS: dict[str, Any] = {
     "highs": mathopt.SolverType.HIGHS,
@@ -55,13 +58,26 @@ class Solution:
 
 @dataclass(frozen=True)
 class Relaxation:
-    """Tightness and shadow prices (USD/day per unit) of the two demand constraints in the
-    LP relaxation."""
+    """Tightness and shadow prices (USD/day per unit) of the demand constraints in the LP
+    relaxation. The flags say whether any class's request (token) demand is tight; the
+    scalar shadow prices are the first class's. `classes` holds (requests tight, tokens
+    tight) and `class_shadow_prices` (requests, tokens) per class."""
 
     requests_tight: bool
     tokens_tight: bool
     requests_shadow_price: float
     tokens_shadow_price: float
+    classes: tuple[tuple[bool, bool], ...] = ()
+    class_shadow_prices: tuple[tuple[float, float], ...] = ()
+
+
+@dataclass(frozen=True)
+class Allocation:
+    """The routing LP's answer over a fixed fleet: the uniform headroom `theta` (class
+    capacity over demand) and replica-equivalents `x[j][k]` of column j serving class k."""
+
+    theta: float
+    x: tuple[tuple[float, ...], ...]
 
 
 def parameters(backend: str, time_limit_s: float, seed: int) -> Any:
@@ -157,26 +173,57 @@ def _tight(constraint: Any, activity: float) -> bool:
     return activity - bound <= TIGHT_TOLERANCE * max(1.0, abs(bound))
 
 
-def relaxation(formulation: Formulation) -> Relaxation:
-    """Solve the LP relaxation (built with `relax=True`) with GLOP and report which demand
-    constraints are tight and their shadow prices. Raises `SolverError` if GLOP fails."""
+def _glop(model: Any) -> Any:
     result = mathopt.solve(
-        formulation.model,
-        mathopt.SolverType.GLOP,
-        params=parameters("glop", LP_TIME_LIMIT_S, 0),
+        model, mathopt.SolverType.GLOP, params=parameters("glop", LP_TIME_LIMIT_S, 0)
     )
     if result.termination.reason != mathopt.TerminationReason.OPTIMAL:
         raise SolverError(f"LP relaxation terminated with {result.termination.reason.name}")
+    return result
+
+
+def relaxation(formulation: Formulation) -> Relaxation:
+    """Solve the LP relaxation (built with `relax=True`) with GLOP and report which demand
+    constraints are tight and their shadow prices. Raises `SolverError` if GLOP fails."""
+    result = _glop(formulation.model)
     values = result.variable_values()
-    requests, tokens = formulation.request_demand, formulation.token_demand
 
     def activity(constraint: Any) -> float:
         return math.fsum(float(t.coefficient * values[t.variable]) for t in constraint.terms())
 
-    duals = result.dual_values([requests, tokens])
-    return Relaxation(
-        requests_tight=_tight(requests, activity(requests)),
-        tokens_tight=_tight(tokens, activity(tokens)),
-        requests_shadow_price=duals[0] / formulation.objective_scale,
-        tokens_shadow_price=duals[1] / formulation.objective_scale,
+    pairs = formulation.demands
+    flags = tuple((_tight(r, activity(r)), _tight(t, activity(t))) for r, t in pairs)
+    duals = result.dual_values([c for pair in pairs for c in pair])
+    prices = tuple(
+        (duals[2 * k] / formulation.objective_scale, duals[2 * k + 1] / formulation.objective_scale)
+        for k in range(len(pairs))
     )
+    return Relaxation(
+        requests_tight=any(r for r, _ in flags),
+        tokens_tight=any(t for _, t in flags),
+        requests_shadow_price=prices[0][0],
+        tokens_shadow_price=prices[0][1],
+        classes=flags,
+        class_shadow_prices=prices,
+    )
+
+
+ALLOCATION_FLOOR = 1e-7  # replica-equivalents below this are LP noise, reported as 0
+THETA_SLACK = 1e-9  # relative slack on theta* when maximizing the allocations
+
+
+def balance(
+    cols: Sequence[Column], counts: Sequence[int], demands: Sequence[tuple[float, float]]
+) -> Allocation:
+    """Spread a fixed fleet over the classes (GLOP, two stages): maximize the uniform
+    headroom theta, then, keeping theta, maximize the allocated replica time. Allocations
+    under 1e-7 replica-equivalents are reported as 0. Raises `SolverError` if GLOP fails."""
+    first = build_balance(cols, counts, demands)
+    theta = float(_glop(first.model).variable_values(first.theta))
+    second = build_balance(cols, counts, demands, theta_floor=theta * (1 - THETA_SLACK))
+    values = _glop(second.model).variable_values()
+    x = tuple(
+        tuple(0.0 if v is None or values[v] < ALLOCATION_FLOOR else float(values[v]) for v in row)
+        for row in second.allocations
+    )
+    return Allocation(theta=theta, x=x)

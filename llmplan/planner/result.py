@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -130,7 +130,12 @@ def binding_label(requests_tight: bool, tokens_tight: bool) -> Binding:
 
 def status_counts(candidates: Sequence[CandidateEval]) -> str:
     """`"40 no_fit, 56 slo_ttft"`: nonzero rejection counts in `Status` order."""
-    counts = Counter(c.status for c in candidates)
+    return count_statuses(c.status for c in candidates)
+
+
+def count_statuses(statuses: Iterable[Status]) -> str:
+    """`"40 no_fit, 56 slo_ttft"` for any statuses (M7: per-class verdicts)."""
+    counts = Counter(statuses)
     parts = [f"{counts[s]} {s}" for s in get_args(Status) if s != "eligible" and counts[s]]
     return ", ".join(parts) or "none rejected"
 

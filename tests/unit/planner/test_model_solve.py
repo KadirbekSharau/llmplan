@@ -10,7 +10,7 @@ from ortools.math_opt.python import mathopt
 
 from llmplan.errors import InfeasiblePlan, SolverError
 from llmplan.planner import solve as solve_module
-from llmplan.planner.baseline import best_homogeneous, replicas_needed
+from llmplan.planner.baseline import best_homogeneous, replica_equivalents
 from llmplan.planner.candidates import Column, columns, evaluate_candidates, rows_in_scope
 from llmplan.planner.model import build_model
 from llmplan.planner.solve import available, check_backend, relaxation, solve
@@ -185,9 +185,10 @@ def test_solver_runtime_error_and_bad_relaxation(
 
 
 def test_baseline_enumeration(cols: tuple[Column, ...]) -> None:
-    assert replicas_needed(0.0, 3.0) == 0
-    assert replicas_needed(30.0, 3.0) == 10
-    assert replicas_needed(30.1, 3.0) == 11
+    assert replica_equivalents([(3.0, 300.0)], [(0.0, 0.0)]) == 0.0
+    assert replica_equivalents([(3.0, 300.0)], [(30.0, 900.0)]) == 10.0
+    assert replica_equivalents([(3.0, 300.0), (2.0, 100.0)], [(3.0, 0.0), (1.0, 150.0)]) == 2.5
+    assert replica_equivalents([(3.0, 300.0), (0.0, 0.0)], [(3.0, 0.0), (1.0, 0.0)]) is None
     exact = [dataclasses.replace(c, rps=float(r)) for c, r in zip(cols, (3, 4), strict=True)]
     best = best_homogeneous(exact, 34.0, 0.0, 1000)
     assert best is not None

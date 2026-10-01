@@ -17,11 +17,13 @@ from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec
 from llmplan.memory.engine import EngineProfile
 from llmplan.types import Commitment, DType
+from llmplan.workload.classes import DemandClass
 from llmplan.workload.schema import WorkloadStats
 
 SolverName = Literal["highs", "cp_sat", "scip", "gurobi"]
 PositiveInt = Annotated[int, Field(gt=0)]
 MAX_SEED = 2**31 - 1  # largest seed every MathOpt backend accepts unchanged
+SHARE_TOLERANCE = 1e-6
 
 
 class SLO(BaseModel):
@@ -85,7 +87,10 @@ class PlanRequest(BaseModel):
     """Everything one plan needs: model, workload statistics, SLO, engine, options, catalogs.
 
     The catalogs are passed explicitly (not read from disk) so callers and tests can inject
-    rows. Every in-scope price row's `gpu_id` must be a key of `gpus`.
+    rows. Every in-scope price row's `gpu_id` must be a key of `gpus`. `classes` (M7) are
+    the workload's request-size classes from `classify` on the same trace and window as
+    `stats`; empty means one class, the whole workload, exactly as in M4. Their indices must
+    be 0..K-1 in order and their shares must sum to 1.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -97,3 +102,12 @@ class PlanRequest(BaseModel):
     options: PlanOptions
     gpus: Mapping[str, GPUSpec]
     prices: tuple[PriceRow, ...]
+    classes: tuple[DemandClass, ...] = ()
+
+    @pydantic.model_validator(mode="after")
+    def _consistent_classes(self) -> Self:
+        if [c.index for c in self.classes] != list(range(len(self.classes))):
+            raise ValueError("classes must be indexed 0..K-1 in order")
+        if self.classes and abs(sum(c.share for c in self.classes) - 1) > SHARE_TOLERANCE:
+            raise ValueError("class shares must sum to 1")
+        return self

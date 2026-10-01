@@ -196,7 +196,6 @@ def test_8_1_single_class_reproduces_m4(case: str, fake_perf: UseFakePerf) -> No
     assert weights == pytest.approx(1.0, abs=1e-9)
 
 
-@pytest.mark.xfail(strict=True, reason="M7: lands with the formulation and result commits")
 def test_8_1_single_class_infeasible_matches(fake_perf: UseFakePerf) -> None:
     fake_perf(A_B)
     req = request(34, slo=SLO(ttft_ms_p95=10, utilization_target=1.0))

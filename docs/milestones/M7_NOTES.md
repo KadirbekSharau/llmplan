@@ -44,6 +44,53 @@ docs/milestones/M7_DESIGN.md; "8b" is the carry-over list.
   classes, the M4 path), `AxB` (quantile), `fixed:<input edges>/<output edges>` with
   comma-separated edges, either side possibly empty (e.g. `fixed:1024,4096/256`).
 
+- **Step 3 — Per-class candidates (`planner/classes.py`).** A candidate that passed the
+  tensor-parallel and memory checks is estimated once per class by the M3 `estimate()`
+  with the `DemandClass` as its `StatsLike`, cached by (GPU id, replica config, class) so
+  price rows sharing a GPU reuse the estimate. Class verdicts reconcile with the
+  whole-workload verdict as follows: eligible for some class -> `eligible` (a candidate
+  that failed the whole workload's SLO says "eligible for class 0 only (whole workload:
+  ...)"; one that passed it but misses classes appends "not eligible for class 1 (...)");
+  eligible for none -> the first class's rejection. `CandidateEval.perf` and
+  `usd_per_hour_per_rps` stay the whole-workload estimate (the class estimate only when the
+  whole workload had none), because `perf` also drives the simulator's service times.
+  With classes, a class that has demand but no eligible candidate raises `InfeasiblePlan`
+  naming the class and its bounds before any solve.
+- **Step 3 — One class is M4.** With one class `x_r = m_r` is optimal (capacities are
+  non-negative), so the formulation with one class (or none) is built exactly as M4's,
+  with the class's demand; only two or more classes add `x_{r,k}`. Test 8.1 checks the
+  results serialize identically, and the pre-M7 CLI golden still matches byte for byte.
+- **Step 3 — Class model.** `x_{r,k}` exists only where candidate r is eligible for class k
+  (capacity > 0). HiGHS sees them as continuous. CP-SAT needs integers: allocations are
+  milli-replicas `X = 1000 x` (`sum_k X <= 1000 m`, exact), capacities are floored to
+  milli-units as in M4, and the class demand is multiplied by 10^6 and rounded up, so
+  every scaled solution is feasible unscaled. On razor-thin margins CP-SAT's whole
+  milli-replicas may need one more replica than HiGHS; the reported cost is always
+  recomputed from the integers.
+- **Step 3 — Routing LP.** The MILP's `x` is not unique (any split with enough capacity
+  is optimal), so after the solve a GLOP LP over the chosen fleet fixes it: stage 1
+  maximizes the uniform headroom `theta` (every class's capacity >= theta x its demand,
+  rows written as capacity / demand so coefficients are O(1)); stage 2 keeps theta >=
+  theta* (1 - 1e-9) and maximizes the allocated replica time, so time no class needs is
+  still given to classes the replica can serve. Allocations under 1e-7 are reported as
+  0. theta is capped at 10,000: with a 10^9 cap GLOP returned IMPRECISE on the 8.2
+  baseline, and a smaller cap also tightened its answers (1.0666667223 against 16/15 with
+  10^9, exact to 1e-13 with 10^4). With classes, `capacity_rps` and
+  `capacity_output_tokens_per_s` are the capacity this LP gives the classes, summed, and
+  the below-demand guard checks theta* >= 1 - 1e-6.
+- **Step 3 — Binding with classes.** The LP relaxation over the chosen columns is the class
+  model relaxed; `binding` says whether any class's request (token) constraint is tight.
+  Per-class labels are exposed in step 4 (`class_binding`).
+- **Step 3 — Baseline with classes.** One column must serve every class with demand; its
+  replicas split their time, so it needs `ceil(sum_k max(D_k / cap_k, T_k / tok_k))`
+  replicas (the same guard against float noise as M4). With one class this is M4's
+  `max(ceil(D / cap), ceil(T / tok), 1)`. M4's `replicas_needed` became
+  `replica_equivalents`.
+- **Step 3 — `planner/explain.py`.** `plan()` in `planner/__init__.py` was 283 lines; the
+  M4 helpers that explain a fleet (binding LP, assumption lines, headroom, the baseline
+  `PlanResult`) moved to `explain.py` unchanged, with capacity added, so no module exceeds
+  300 lines.
+
 ## Deviations from the design doc
 
 - **`DemandClass` gains `input_tokens_p50`, `output_tokens_p50` and `notes`.** The perf

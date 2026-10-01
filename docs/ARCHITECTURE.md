@@ -142,8 +142,12 @@ llmplan/
     __init__.py          # plan() (M4 public API): validate, evaluate, prune, solve, explain
     request.py           # SLO, PlanOptions, PlanRequest
     candidates.py        # candidate enumeration and pre-solve checks, Column, dominance pruning
-    model.py             # MathOpt formulation (pure: columns in, model out)
-    solve.py             # backend selection, parameters, determinism, LP relaxation (GLOP)
+    classes.py           # M7: per-class candidate estimates and verdicts, class demands
+    model.py             # MathOpt formulation (pure: columns in, model out); M7 class model
+                         #   (allocations x_{r,k}) and the routing LP over a fixed fleet
+    solve.py             # backend selection, parameters, determinism, LP relaxation and
+                         #   routing LP (GLOP)
+    explain.py           # M7 (moved from __init__): capacity, binding LP, assumptions, baseline
     baseline.py          # best homogeneous fleet by enumeration (no solver)
     result.py            # CandidateEval, ReplicaPlan, FleetItem, SolverInfo, PlanResult
   simulate/              # M5
@@ -421,6 +425,8 @@ class PlanRequest(BaseModel, frozen=True):
     options: PlanOptions
     gpus: Mapping[str, GPUSpec]               # catalogs passed explicitly (tests inject rows)
     prices: tuple[PriceRow, ...]
+    classes: tuple[DemandClass, ...] = ()     # M7: from classify() on the same trace; () = one
+                                              #   class (the whole workload, M4 behaviour)
 
 # llmplan/planner/result.py (M4)
 class CandidateEval(BaseModel, frozen=True):
