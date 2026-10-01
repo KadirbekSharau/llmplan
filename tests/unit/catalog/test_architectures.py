@@ -36,10 +36,11 @@ def test_resolve_hf_class() -> None:
     key, defaults = architectures.resolve_hf_class("Qwen3ForCausalLM")
     assert key == "llama_like"
     assert defaults.qk_norm is True
+    assert architectures.resolve_hf_class("MixtralForCausalLM")[0] == "mixtral"  # M8
     with pytest.raises(UnsupportedArchitecture) as info:
-        architectures.resolve_hf_class("MixtralForCausalLM")
+        architectures.resolve_hf_class("GPT2LMHeadModel")
     assert info.value.field == "architectures"
-    assert "MixtralForCausalLM" in str(info.value)
+    assert "GPT2LMHeadModel" in str(info.value)
 
 
 def test_tiny_param_count_by_hand() -> None:

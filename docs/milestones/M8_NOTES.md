@@ -152,6 +152,50 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   allow-list in `tests/unit/ui/test_presets.py` gained it). To keep `app.py` under the M6
   design's 400 lines (now 398), the page title and intro moved to `views.header()`. The
   banner's expander links to the section with `[How to calibrate](#calibrate)`.
+- **Step 4 — MoE registry members (`llmplan/catalog/architectures/moe.py`).** `mixtral`
+  (`MixtralForCausalLM`) and `qwen_moe` (`Qwen3MoeForCausalLM` with `qk_norm`,
+  `Qwen2MoeForCausalLM` with q/k/v bias) share one formula class; the per-part formulas
+  (attention, norms, dense MLP, embeddings) moved to functions in `llama_like.py` so both
+  families count attention identically. Expected values reproduce exactly:
+  Mixtral-8x7B 46,702,792,704 / 12,879,925,248, Qwen3-30B-A3B 30,532,122,624 /
+  3,353,032,704, bf16 weights 61,064,245,248, KV 131,072 and 98,304 bytes per token.
+  `active_params` counts embeddings and lm_head as active (as the official "active"
+  figures do), so a dense model's active count equals its total.
+- **Step 4 — Loading.** Each family reads its own keys through the new
+  `Architecture.config_fields(model_id, raw)` (dense: none); `moe_layer_indices` is derived
+  there (Mixtral: every layer; Qwen: layer `i` when `i` is not in `mlp_only_layers` and
+  `(i + 1) % decoder_sparse_step == 0`, as transformers does). A missing required key is
+  `UnsupportedArchitecture(field=<key>)`, a wrong type `CatalogError` naming the field, as
+  for the common keys. `shared_expert_intermediate_size` is read for Qwen2-MoE only (the
+  design's "Qwen2-MoE only, 0 if absent"). `ModelSpec` validates that `1 <= k <= E`,
+  that `moe_intermediate_size` is set, and that the MoE layers are distinct, sorted and in
+  range, and that a dense spec has none of them.
+- **Step 4 — Memory and roofline.** Weights count every expert (`count_params`), KV is
+  unchanged. `perf.roofline.decode_weight_bytes(model, dtype, tp, batch, per_gpu)` is the
+  bytes one GPU reads per decode step: dense models return `per_gpu` unchanged (so every
+  dense estimate is bit-identical to M7), MoE models `(non_expert + expert * min(1, B * k /
+  E)) / tp` with `expert = expert_weight_bytes(model, dtype)` (routed experts only; the
+  router and Qwen2's shared expert are non-expert). Decode and prefill FLOPs use
+  `active_param_count`, in the roofline, the table backend's roofline prefill and the
+  benchmark physical floor (which also reads only the touched experts). Every MoE
+  estimate states the assumption (uniform routing, even tensor-parallel split of experts),
+  and `fit()` notes that all experts are resident. A MoE model with
+  `param_count_override` has no known expert split and is treated as dense (active =
+  total, all weights read), the conservative reading.
+- **Step 4 — MLA.** `DeepseekV2ForCausalLM` and `DeepseekV3ForCausalLM` raise
+  `UnsupportedArchitecture` ("multi-head latent attention (MLA) is not modeled",
+  `field="architectures"`) before any key is read; `fixture:deepseek-v3` (architectural
+  integers of the public config) is the test case, excluded from the UI picker like gpt2.
+- **Step 4 — Fixtures and UI.** `mixtral-8x7b.json` and `qwen3-30b-a3b.json` carry only the
+  integers the loader reads (values from the public configs; Qwen3's explicit `head_dim`
+  128 differs from 2048 / 32, which `fit()` notes as trusted). The UI picker offers both
+  fixtures and the two Hugging Face ids. `llmplan model-info` text gains an `Experts` line
+  for MoE models only (dense output unchanged); its JSON `derived` object and every
+  `ModelSpec` dump gain the new fields.
+- **Step 4 — Test changed for the new scope.** `tests/unit/catalog/test_architectures.py::
+  test_resolve_hf_class` used `MixtralForCausalLM` as its example of an unsupported class;
+  it now asserts that Mixtral resolves to `mixtral` and uses `GPT2LMHeadModel` as the
+  unsupported example.
 
 ## Deviations from the design doc
 
@@ -171,6 +215,12 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   "the existing `backends=` override mechanism (M3)", which existed only on
   `perf.estimate`; the planner calls `estimate` internally, so it needs the same keyword.
   `compare_single_class` passes it on too. ARCHITECTURE.md section 5 updated.
+
+- **Step 4 — `Architecture` gains `config_fields`, `active_params` and `expert_params`.**
+  The design lists the new `ModelSpec` and `DerivedModelInfo` fields but not where the
+  family-specific config keys are read or how decode bytes split experts from the rest;
+  keeping both in the registry member keeps "a new family is one module plus one import".
+  ARCHITECTURE.md sections 3, 4 and 6 updated.
 
 ## Questions for founder
 

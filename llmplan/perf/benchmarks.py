@@ -23,7 +23,13 @@ from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
 from llmplan.errors import BenchmarkError, CatalogError
 from llmplan.memory.kv_cache import kv_bytes_per_token_per_gpu
 from llmplan.memory.weights import per_gpu_weight_bytes
-from llmplan.perf.roofline import decode_compute_s, decode_memory_s, dense_tflops, param_count
+from llmplan.perf.roofline import (
+    active_param_count,
+    decode_compute_s,
+    decode_memory_s,
+    decode_weight_bytes,
+    dense_tflops,
+)
 from llmplan.types import DType
 
 DEFAULT_BENCHMARKS_DIR = DATA_DIR / "benchmarks"
@@ -119,12 +125,16 @@ def physical_floor_s(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> float
 
     Roofline step time at 100% bandwidth efficiency and 100% MFU, with the smallest storage
     the row could have used (fp8 KV cache, embeddings at the weight dtype), at context
-    `input_len + output_len / 2`. `None` when the GPU has neither bandwidth nor TFLOPS.
+    `input_len + output_len / 2`. `None` when the GPU has neither bandwidth nor TFLOPS. M8:
+    for a mixture of experts, the expert weights a batch touches and the active parameters.
     """
     tp = row.tensor_parallel
     terms: list[float] = []
     if gpu.memory_bandwidth_gbps is not None:
-        weights = per_gpu_weight_bytes(model, row.dtype, tp, quantize_embeddings=True)
+        per_gpu = per_gpu_weight_bytes(model, row.dtype, tp, quantize_embeddings=True)
+        weights = decode_weight_bytes(
+            model, row.dtype, tp, row.concurrency, per_gpu, quantize_embeddings=True
+        )
         kv = kv_bytes_per_token_per_gpu(model, "fp8", tp)
         ctx = row.input_len + row.output_len / 2
         terms.append(
@@ -134,7 +144,9 @@ def physical_floor_s(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> float
         )
     tflops = dense_tflops(gpu, row.dtype)
     if tflops is not None:
-        terms.append(decode_compute_s(param_count(model), row.concurrency, tp, tflops, mfu=1.0))
+        terms.append(
+            decode_compute_s(active_param_count(model), row.concurrency, tp, tflops, mfu=1.0)
+        )
     return max(terms) if terms else None
 
 

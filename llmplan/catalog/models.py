@@ -34,9 +34,12 @@ _FIXTURE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class ModelSpec(BaseModel):
-    """Architectural integers of one dense decoder (ARCHITECTURE.md section 4).
+    """Architectural integers of one decoder (ARCHITECTURE.md section 4).
 
     Strict: config.json values must already have the right JSON type (no `true` -> 1).
+    M8, mixture of experts: `num_experts` routed experts of width `moe_intermediate_size`,
+    `experts_per_token` of them per token, an optional shared expert, on the layers in
+    `moe_layer_indices` (derived at load); all zero / empty for a dense model.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -57,6 +60,11 @@ class ModelSpec(BaseModel):
     max_position_embeddings: int = Field(gt=0)
     sliding_window: int | None = Field(default=None, gt=0)
     param_count_override: int | None = Field(default=None, gt=0)
+    num_experts: int = Field(default=0, ge=0)
+    experts_per_token: int = Field(default=0, ge=0)
+    moe_intermediate_size: int | None = Field(default=None, gt=0)
+    shared_expert_intermediate_size: int = Field(default=0, ge=0)
+    moe_layer_indices: tuple[int, ...] = ()
     source: Literal["huggingface", "fixture", "manual"]
 
     @pydantic.model_validator(mode="after")
@@ -68,6 +76,24 @@ class ModelSpec(BaseModel):
             )
         return self
 
+    @pydantic.model_validator(mode="after")
+    def _experts_consistent(self) -> Self:
+        if self.num_experts == 0:
+            if self.experts_per_token or self.moe_layer_indices:
+                raise ValueError("experts_per_token and moe_layer_indices need num_experts > 0")
+            return self
+        if not 1 <= self.experts_per_token <= self.num_experts:
+            raise ValueError(
+                f"experts_per_token ({self.experts_per_token}) must be between 1 and "
+                f"num_experts ({self.num_experts})"
+            )
+        if self.moe_intermediate_size is None:
+            raise ValueError("moe_intermediate_size is required with num_experts > 0")
+        layers = self.moe_layer_indices
+        if not layers or list(layers) != sorted(set(layers)) or layers[-1] >= self.num_layers:
+            raise ValueError("moe_layer_indices must be distinct, sorted layer indices")
+        return self
+
     @property
     def attention(self) -> Attention:
         if self.num_kv_heads == self.num_attention_heads:
@@ -76,11 +102,14 @@ class ModelSpec(BaseModel):
 
 
 class DerivedModelInfo(BaseModel):
-    """Values computed from a `ModelSpec` (see `llmplan.memory.weights.model_info`)."""
+    """Values computed from a `ModelSpec` (see `llmplan.memory.weights.model_info`).
+    `active_param_count` (M8) is the parameters that compute per token: all of them for a
+    dense model, the shared parts plus `experts_per_token` experts for a MoE model."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     param_count: int = Field(gt=0)
+    active_param_count: int = Field(gt=0)
     attention: Attention
     weight_bytes_by_dtype: dict[DType, int]
 
@@ -200,6 +229,7 @@ def _spec_from_config(
             f"{model_id}: config.json has no usable 'architectures' list", field="architectures"
         )
     key, defaults = architectures.resolve_hf_class(archs[0])
+    family = architectures.get(key).config_fields(model_id, raw)  # M8: e.g. MoE keys
 
     fields: dict[str, Any] = {}
     for field, (hf_key, default) in _KEY_MAP.items():
@@ -229,6 +259,7 @@ def _spec_from_config(
             qk_norm=defaults.qk_norm,
             source=source,
             **fields,
+            **family,
         )
     except pydantic.ValidationError as exc:
         err = exc.errors()[0]

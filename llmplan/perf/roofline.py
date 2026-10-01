@@ -2,7 +2,9 @@
 
 Decode is bounded by streaming the weights plus the batch's KV cache from HBM once per step,
 or by the step's matmul FLOPs, whichever is slower; prefill by FLOPs alone. The efficiency
-constants below are assumptions, restated in every estimate's `assumptions`.
+constants below are assumptions, restated in every estimate's `assumptions`. M8, mixture of
+experts: FLOPs use the active parameters, and a decode step reads the non-expert weights
+plus the expected fraction `min(1, B * k / E)` of the expert weights.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from llmplan.catalog.hardware import GPUSpec
 from llmplan.catalog.models import ModelSpec
 from llmplan.memory.dtypes import QUANTIZED_INT
 from llmplan.memory.fit import FitResult
+from llmplan.memory.weights import expert_weight_bytes, weight_bytes
 from llmplan.perf.config import ReplicaConfig, fit_for
 from llmplan.perf.estimate import PerfEstimate, StatsLike, register
 from llmplan.types import DType
@@ -26,11 +29,47 @@ CONSTANTS_NOTE = (
     f"{DECODE_MFU:g}, prefill MFU {PREFILL_MFU:g}, p95 TPOT = p50 x {P95_FACTOR:g}"
 )
 SERVICE_NOTE = "latencies are service times; queueing is not modeled"
+MOE_NOTE = (
+    "mixture of experts: FLOPs use the {active:,} active of {total:,} parameters; a decode "
+    "step reads the non-expert weights plus min(1, batch x {k} / {e}) of the expert weights "
+    "(expected share of experts a batch touches, uniform routing assumed)"
+)
 
 
 def param_count(model: ModelSpec) -> int:
     """Exact parameter count (or the model's `param_count_override`)."""
     return architectures.get(model.architecture).count_params(model)
+
+
+def active_param_count(model: ModelSpec) -> int:
+    """M8: parameters that compute per token (all of them for a dense model)."""
+    return architectures.get(model.architecture).active_params(model)
+
+
+def decode_weight_bytes(
+    model: ModelSpec,
+    dtype: DType,
+    tensor_parallel: int,
+    batch: int,
+    weight_bytes_per_gpu: int,
+    *,
+    quantize_embeddings: bool = False,
+) -> float:
+    """Weight bytes one GPU reads per decode step at `batch` concurrent sequences.
+
+    Dense: `weight_bytes_per_gpu` (every weight, every step). Mixture of experts (M8):
+    `(non_expert + expert * min(1, batch * k / E)) / tensor_parallel`, the expected share of
+    experts a batch of `batch` tokens touches with `k` of `E` experts each (documented
+    assumption: uniform routing, experts split evenly across the tensor-parallel GPUs).
+    """
+    if model.num_experts == 0:
+        return weight_bytes_per_gpu
+    total = weight_bytes(model, dtype, quantize_embeddings=quantize_embeddings)
+    expert = expert_weight_bytes(model, dtype)
+    if expert == 0:  # param_count_override: no expert split known
+        return weight_bytes_per_gpu
+    share = min(1.0, batch * model.experts_per_token / model.num_experts)
+    return (total - expert + expert * share) / tensor_parallel
 
 
 def tflops_field(dtype: DType) -> str:
@@ -55,7 +94,7 @@ def effective_batch(kv_token_capacity: int, max_num_seqs: int, ctx_tokens: float
 
 
 def decode_memory_s(
-    weight_bytes_per_gpu: int,
+    weight_bytes_per_gpu: float,
     kv_bytes_per_token_per_gpu: int,
     batch: int,
     ctx_tokens: float,
@@ -93,7 +132,9 @@ def fit_or_reason(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig) -> FitR
     )
 
 
-def _notes(config: ReplicaConfig, batch: int, kv_seqs: int, ctx: float) -> list[str]:
+def _notes(
+    model: ModelSpec, config: ReplicaConfig, batch: int, kv_seqs: int, ctx: float
+) -> list[str]:
     notes = [
         CONSTANTS_NOTE,
         f"effective batch {batch}: min(max_num_seqs {config.max_num_seqs}, KV capacity "
@@ -103,6 +144,15 @@ def _notes(config: ReplicaConfig, batch: int, kv_seqs: int, ctx: float) -> list[
         notes.append("tensor parallel: ideal compute scaling assumed (communication not modeled)")
     if config.dtype in QUANTIZED_INT:
         notes.append("int8/int4: fp16 Tensor Core TFLOPS used; dequantization not modeled")
+    if model.num_experts:
+        notes.append(
+            MOE_NOTE.format(
+                active=active_param_count(model),
+                total=param_count(model),
+                k=model.experts_per_token,
+                e=model.num_experts,
+            )
+        )
     return notes
 
 
@@ -118,17 +168,18 @@ def _evaluate(
         return f"gpu {gpu.id} has memory_bandwidth_gbps null"
     if tflops is None:
         return f"gpu {gpu.id} has {tflops_field(config.dtype)} null"
-    params = param_count(model)
+    params = active_param_count(model)
     ctx = avg_ctx_tokens(stats)
     batch = effective_batch(fit.kv_token_capacity, config.max_num_seqs, ctx)
-    t_mem = decode_memory_s(
-        fit.per_gpu_weight_bytes, fit.kv_bytes_per_token_per_gpu, batch, ctx, bandwidth
+    read = decode_weight_bytes(
+        model, config.dtype, config.tensor_parallel, batch, fit.per_gpu_weight_bytes
     )
+    t_mem = decode_memory_s(read, fit.kv_bytes_per_token_per_gpu, batch, ctx, bandwidth)
     t_compute = decode_compute_s(params, batch, config.tensor_parallel, tflops)
     tpot_s = max(t_mem, t_compute)
     prefill = prefill_tokens_per_s(tflops, config.tensor_parallel, params)
     service_s = stats.input_tokens_mean / prefill + stats.output_tokens_mean * tpot_s
-    notes = _notes(config, batch, int(fit.kv_token_capacity // max(ctx, 1)), ctx)
+    notes = _notes(model, config, batch, int(fit.kv_token_capacity // max(ctx, 1)), ctx)
     bound = "compute" if t_compute >= t_mem else "memory"
     notes.append(
         f"decode is {bound}-bound: memory {t_mem * 1e3:.3f} ms, compute "

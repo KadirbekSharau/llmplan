@@ -36,12 +36,14 @@ PERF_BACKENDS = ("auto", "roofline", "table")
 CLASS_CHOICES = ("2x2", "1", "3x3")  # M7: request-size classes; the first is the default
 SOLVERS = ("highs", "cp_sat", "scip", "gurobi")
 
-# Model picker: shipped fixtures (offline) and popular dense Hugging Face ids (fetched only
-# when a plan runs). The gpt2 fixture is the unsupported-architecture test case, not offered.
+# Model picker: shipped fixtures (offline) and popular Hugging Face ids, dense and (M8)
+# mixture of experts (fetched only when a plan runs). The gpt2 and deepseek-v3 fixtures are
+# the unsupported-architecture test cases, not offered.
+UNSUPPORTED_FIXTURES = frozenset({"gpt2", "deepseek-v3"})
 FIXTURE_MODELS = tuple(
     f"{FIXTURE_PREFIX}{path.stem}"
     for path in sorted(DEFAULT_FIXTURE_DIR.glob("*.json"))
-    if path.stem != "gpt2"
+    if path.stem not in UNSUPPORTED_FIXTURES
 )
 POPULAR_MODELS = (
     "meta-llama/Llama-3.1-8B-Instruct",
@@ -49,6 +51,8 @@ POPULAR_MODELS = (
     "Qwen/Qwen2.5-7B-Instruct",
     "Qwen/Qwen3-8B",
     "mistralai/Mistral-7B-Instruct-v0.3",
+    "Qwen/Qwen3-30B-A3B",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1",
 )
 DEFAULT_MODEL = f"{FIXTURE_PREFIX}llama3-8b"
 

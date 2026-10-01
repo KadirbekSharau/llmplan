@@ -19,10 +19,15 @@ from llmplan import render
 from llmplan.catalog.hardware import load_gpus, load_prices
 from llmplan.catalog.models import load_model
 from llmplan.cli import app
+from llmplan.errors import UnsupportedArchitecture
 from llmplan.memory.engine import EngineProfile
+from llmplan.memory.fit import FitRequest, fit
+from llmplan.memory.kv_cache import kv_bytes_per_token_total
+from llmplan.memory.weights import expert_weight_bytes, model_info, weight_bytes
 from llmplan.perf import ReplicaConfig, estimate
 from llmplan.perf.benchmarks import BenchmarkRow
 from llmplan.perf.contribute import MAX_URL_CHARS, REPOSITORY_URL, contribute_url
+from llmplan.perf.roofline import BANDWIDTH_EFFICIENCY, decode_weight_bytes
 from llmplan.perf.uploads import CSV_COLUMNS, VllmRun, load_upload, upload_backends
 from llmplan.planner import SLO, PlanOptions, PlanRequest, plan
 from llmplan.simulate.compare import compare_single_class
@@ -229,3 +234,77 @@ def test_9_5_contribute_link() -> None:
     assert len(url_500) < MAX_URL_CHARS
     (body_500,) = parse_qs(urlsplit(url_500).query)["body"]
     assert ",".join(CSV_COLUMNS) not in body_500
+
+
+# 9.6 MoE parameter counts (M8_DESIGN.md section 6 table; official 46.7B/12.9B, 30.5B/3.3B).
+@pytest.mark.parametrize(
+    ("fixture", "params", "active", "kv_bytes"),
+    [
+        ("mixtral-8x7b", 46_702_792_704, 12_879_925_248, 131_072),
+        ("qwen3-30b-a3b", 30_532_122_624, 3_353_032_704, 98_304),
+    ],
+)
+def test_9_6_moe_parameter_counts(fixture: str, params: int, active: int, kv_bytes: int) -> None:
+    spec = load_model(f"fixture:{fixture}")
+    info = model_info(spec)
+    assert info.param_count == params
+    assert info.active_param_count == active
+    assert info.attention == spec.attention == "gqa"
+    assert kv_bytes_per_token_total(spec, "bf16") == kv_bytes
+
+
+# 9.7 MoE fit and roofline.
+QWEN3_MOE = load_model("fixture:qwen3-30b-a3b")
+
+
+def test_9_7_moe_fit() -> None:
+    h100 = fit(
+        FitRequest(model=QWEN3_MOE, gpu=H100, tensor_parallel=1, dtype="bf16", context_len=8192)
+    )
+    assert h100.fits
+    assert h100.per_gpu_weight_bytes == 61_064_245_248  # all 128 experts resident
+    l4 = fit(
+        FitRequest(
+            model=QWEN3_MOE,
+            gpu=load_gpus()["l4-24gb"],
+            tensor_parallel=1,
+            dtype="bf16",
+            context_len=8192,
+        )
+    )
+    assert not l4.fits
+    assert l4.binding == "weights"
+
+
+@pytest.mark.parametrize(("batch", "share"), [(1, 8 / 128), (64, 1.0)])
+def test_9_7_moe_roofline_decode_bytes(batch: int, share: float) -> None:
+    expert = expert_weight_bytes(QWEN3_MOE, "bf16")
+    non_expert = weight_bytes(QWEN3_MOE, "bf16") - expert
+    assert non_expert + expert == 61_064_245_248
+    expected = non_expert + expert * min(1, batch * 8 / 128)
+    assert share == min(1, batch * 8 / 128)
+    read = decode_weight_bytes(QWEN3_MOE, "bf16", 1, batch, 61_064_245_248)
+    assert read == pytest.approx(expected, rel=1e-9)
+    # ...and the roofline estimate's decode step reads exactly that (memory-bound here).
+    stats = FakeStats(
+        input_tokens_mean=1000,
+        input_tokens_p50=1000,
+        input_tokens_p95=1000,
+        output_tokens_mean=200,
+        output_tokens_p50=200,
+        output_tokens_p95=200,
+    )
+    config = ReplicaConfig(max_num_seqs=batch, max_model_len=8192)
+    result = estimate(QWEN3_MOE, H100, config, stats, backend="roofline")
+    assert result.effective_batch == batch
+    assert H100.memory_bandwidth_gbps is not None
+    kv = batch * 1100 * 98_304  # batch x (input + output / 2) tokens x KV bytes per token
+    step_s = (expected + kv) / (H100.memory_bandwidth_gbps * 1e9 * BANDWIDTH_EFFICIENCY)
+    assert result.tpot_ms_p50 == pytest.approx(step_s * 1e3, rel=1e-9)
+
+
+# 9.8 Unsupported MLA.
+def test_9_8_unsupported_mla() -> None:
+    with pytest.raises(UnsupportedArchitecture, match="MLA") as info:
+        load_model("fixture:deepseek-v3")  # architectures: ["DeepseekV3ForCausalLM"]
+    assert info.value.field == "architectures"

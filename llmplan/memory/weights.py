@@ -38,10 +38,19 @@ def per_gpu_weight_bytes(
     return -(-total // tensor_parallel)
 
 
+def expert_weight_bytes(spec: ModelSpec, dtype: DType) -> int:
+    """M8: bytes of the routed experts stored in `dtype` (0 for a dense model). Experts are
+    never embeddings, so int8/int4 store them at the dtype's width."""
+    return bytes_for(architectures.get(spec.architecture).expert_params(spec), dtype)
+
+
 def model_info(spec: ModelSpec) -> DerivedModelInfo:
-    """Parameter count, attention kind, and weight bytes for every `DType` of `spec`."""
+    """Parameter counts (total and, M8, active per token), attention kind, and weight bytes
+    for every `DType` of `spec`."""
+    arch = architectures.get(spec.architecture)
     return DerivedModelInfo(
-        param_count=architectures.get(spec.architecture).count_params(spec),
+        param_count=arch.count_params(spec),
+        active_param_count=arch.active_params(spec),
         attention=spec.attention,
         weight_bytes_by_dtype={d: weight_bytes(spec, d) for d in get_args(DType)},
     )

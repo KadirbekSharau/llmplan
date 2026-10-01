@@ -20,11 +20,11 @@ from llmplan.perf.estimate import PerfEstimate, StatsLike, register
 from llmplan.perf.roofline import (
     P95_FACTOR,
     SERVICE_NOTE,
+    active_param_count,
     avg_ctx_tokens,
     dense_tflops,
     effective_batch,
     fit_or_reason,
-    param_count,
     prefill_tokens_per_s,
     tflops_field,
 )
@@ -197,7 +197,7 @@ def _from_rows(
         tflops = dense_tflops(gpu, config.dtype)
         if tflops is None:
             return f"rows carry no TTFT and gpu {gpu.id} has {tflops_field(config.dtype)} null"
-        prefill = prefill_tokens_per_s(tflops, config.tensor_parallel, param_count(model))
+        prefill = prefill_tokens_per_s(tflops, config.tensor_parallel, active_param_count(model))
         notes.append("prefill rate from the roofline model (rows carry no TTFT)")
     notes.append(SERVICE_NOTE)
     service_s = stats.input_tokens_mean / prefill + stats.output_tokens_mean * tpot_p50 / 1e3

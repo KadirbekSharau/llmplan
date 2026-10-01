@@ -113,8 +113,8 @@ llmplan/
     models.py            # ModelSpec + loaders (HF fetch behind protocol, fixtures)
     architectures/       # registry: per-architecture parameter/KV formulas
       __init__.py        # register(), get()
-      llama_like.py      # llama, mistral, qwen2, qwen3 (dense)
-      ...                # moe.py etc. added in later milestones
+      llama_like.py      # llama, mistral, qwen2, qwen3 (dense); per-part formulas shared
+      moe.py             # M8: mixtral, qwen_moe (Qwen2-MoE, Qwen3-MoE); MLA unsupported
     hardware.py          # GPUSpec, PriceRow, catalog loaders (YAML)
   memory/
     dtypes.py            # bytes-per-element table
@@ -237,12 +237,18 @@ class ModelSpec(BaseModel, frozen=True):
     max_position_embeddings: int
     sliding_window: int | None  # informational in M1
     param_count_override: int | None   # user-supplied when architecture unsupported
+    num_experts: int = 0                # M8 mixture of experts (0: dense): routed experts
+    experts_per_token: int = 0          #   k, 1 <= k <= num_experts
+    moe_intermediate_size: int | None = None   # expert width (Mixtral: intermediate_size)
+    shared_expert_intermediate_size: int = 0   # Qwen2-MoE shared expert (0: none)
+    moe_layer_indices: tuple[int, ...] = ()    # derived at load from the family's config
     source: Literal["huggingface", "fixture", "manual"]
     # strict=True: config values must already be ints/bools. Property `attention` derives
     # mha/gqa/mqa. Validator: num_attention_heads % num_kv_heads == 0.
 
 class DerivedModelInfo(BaseModel, frozen=True):   # computed by memory.weights.model_info
-    param_count: int
+    param_count: int                    # all parameters (MoE: every expert, resident)
+    active_param_count: int             # M8: parameters computing per token (dense: all)
     attention: Attention
     weight_bytes_by_dtype: dict[DType, int]
 
@@ -696,7 +702,7 @@ no entry points, until an external contributor needs one.
 
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
-| Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
+| Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `config_fields(model_id, raw) -> dict` (M8: the family's own `ModelSpec` fields), `count_params(ModelSpec) -> int`, `active_params(ModelSpec) -> int` (M8), `expert_params(ModelSpec) -> int` (M8, routed experts), `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key (DeepSeek V2/V3 raise `UnsupportedArchitecture` naming MLA) | `llama_like` (M1); `mixtral`, `qwen_moe` (M8) |
 | Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(source, *, max_bytes) -> Workload`; `detect(source) -> str` (`source` is a `Path` or, since M6, an `InMemoryTrace`) | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
