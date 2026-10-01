@@ -11,8 +11,8 @@ satisfied (the CTO review checklist at the bottom is a summary of those rules). 
 | M2 | done | m2-workload, PR #2 (4c6621b) |
 | M3 | done | m3-perf, PR #1 (6675804) |
 | M4 | done | m4-planner, PR #3 (141115e) |
-| M5 | ready for review | m5-simulate |
-| M6 | designed | m6-ui |
+| M5 | done | m5-simulate, PR #4 (ade5b93) |
+| M6 | in progress | m6-ui |
 | M7 | drafted (after M6) | m7-demand-classes |
 
 Effort estimates assume one capable agent working continuously and include tests and docs.
@@ -116,6 +116,11 @@ Acceptance: end-to-end run on the Azure 2024 preset completes under 60 s on a la
 - **Per-request-size demand classes.** Scheduled as M7 (docs/milestones/M7_DESIGN.md),
   which also replaces M4's Mélange acceptance target with a brute-force exactness test and a
   same-inputs cross-check against Mélange's solver.
+- **Simulator KV accounting (M7).** The planner assumes mean KV occupancy (input + output/2,
+  matching vLLM's incremental block allocation); the simulator reserves input + output at
+  admission, which is conservative by up to 2x in concurrency when KV binds. M7 makes the
+  simulator grow KV occupancy as tokens are generated. Found during the M5 review.
+- **** to export per-request rows (M7, small).
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
 - **Model catalog breadth.** MoE and MLA architectures, wheel packaging of `data/`.
 

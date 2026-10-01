@@ -113,5 +113,12 @@ the results.
   class, while `least_outstanding` (class-blind) on the same fleet shows long-class violations.
 - Determinism of JSON output.
 
+## 8b. Carry-over items (in scope for M7)
+- Simulator: incremental KV accounting (reserve input tokens at admission, grow by one
+  token per decode step, release at completion); admission uses projected mean occupancy.
+  Acceptance: on an overloaded single replica, steady-state concurrency rises toward the
+  planner's , within 15%.
+-  exporting the  rows.
+
 ## 9. Allowed dependencies
 None new.

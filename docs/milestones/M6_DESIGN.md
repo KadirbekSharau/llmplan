@@ -109,6 +109,12 @@ price edits, never IPs. Documented in the UI footer in one sentence with the exa
 - `docs/DEPLOY.md`: Streamlit Community Cloud steps (free tier, from the GitHub repo) and
   Docker steps; resource expectations (1 vCPU, 1 GB is enough for fixtures and samples).
 
+## 8b. Carry-over item (in scope for M6)
+- Add  to  (from the candidate's GPU spec times
+  tensor parallel) so the timeline's VRAM panel shows weights / KV in use / free, as PLAN.md
+  promises. Keep the JSON byte-identical apart from the new field; update the M5 plot
+  renderer and its test.
+
 ## 9. Acceptance tests (`tests/acceptance/test_m6.py`, using `AppTest`)
 
 **9.1 Loads.** `AppTest.from_file("llmplan/ui/app.py").run()` has no exceptions and shows
