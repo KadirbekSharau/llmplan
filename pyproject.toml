@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=2.0",
     "ortools>=9.15",
     "matplotlib>=3.11",
+    "streamlit>=1.64",
 ]
 
 [project.scripts]
