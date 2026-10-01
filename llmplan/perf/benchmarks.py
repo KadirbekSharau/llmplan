@@ -1,7 +1,7 @@
 """Benchmark table: row schema, YAML loader, and load-time validation (M3_DESIGN.md 5.1-5.2).
 
-`data/benchmarks/<gpu-id>.yaml` files hold lists of published measurements;
-`data/benchmarks/aliases.yaml` maps model ids (fixtures, renamed repos) to the canonical id
+`<gpu-id>.yaml` files under the shipped `benchmarks/` data directory hold lists of published
+measurements; `aliases.yaml` there maps model ids (fixtures, renamed repos) to the canonical id
 rows are recorded under. Every row is checked against the GPU catalog, a model fixture, and
 the physical floor of the roofline model before it can be used.
 """
@@ -18,19 +18,27 @@ import pydantic
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from llmplan.catalog.hardware import DATA_DIR, GPUSpec, load_gpus
+from llmplan.catalog.hardware import GPUSpec, load_gpus
 from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
 from llmplan.errors import BenchmarkError, CatalogError
 from llmplan.memory.kv_cache import kv_bytes_per_token_per_gpu
 from llmplan.memory.weights import per_gpu_weight_bytes
-from llmplan.perf.roofline import decode_compute_s, decode_memory_s, dense_tflops, param_count
+from llmplan.paths import BENCHMARKS_DIR
+from llmplan.perf.roofline import (
+    active_param_count,
+    decode_compute_s,
+    decode_memory_s,
+    decode_weight_bytes,
+    dense_tflops,
+)
 from llmplan.types import DType
 
-DEFAULT_BENCHMARKS_DIR = DATA_DIR / "benchmarks"
+DEFAULT_BENCHMARKS_DIR = BENCHMARKS_DIR  # package data (llmplan/paths.py)
 ALIASES_FILE = "aliases.yaml"
+USER_UPLOAD = "user-upload"  # M8: source_url of a row uploaded for one session
 
 _ID = r"^[a-z0-9][a-z0-9._-]*$"
-_URL = r"^https://\S+$"
+_URL = r"^(https://\S+|user-upload)$"
 
 
 class BenchmarkRow(BaseModel):
@@ -40,7 +48,9 @@ class BenchmarkRow(BaseModel):
     requests of `input_len` prompt and `output_len` generated tokens. Latencies are `None`
     when the source does not print them (or not their statistic). `engine` records the
     serving stack measured; `"nim"` is an NVIDIA NIM container whose inner engine the source
-    does not name, with the container version as `engine_version`.
+    does not name, with the container version as `engine_version`. `source_url` is an https
+    URL, or (M8) `"user-upload"` for a row uploaded for one session, which a shipped table
+    may not contain.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -116,12 +126,16 @@ def physical_floor_s(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> float
 
     Roofline step time at 100% bandwidth efficiency and 100% MFU, with the smallest storage
     the row could have used (fp8 KV cache, embeddings at the weight dtype), at context
-    `input_len + output_len / 2`. `None` when the GPU has neither bandwidth nor TFLOPS.
+    `input_len + output_len / 2`. `None` when the GPU has neither bandwidth nor TFLOPS. M8:
+    for a mixture of experts, the expert weights a batch touches and the active parameters.
     """
     tp = row.tensor_parallel
     terms: list[float] = []
     if gpu.memory_bandwidth_gbps is not None:
-        weights = per_gpu_weight_bytes(model, row.dtype, tp, quantize_embeddings=True)
+        per_gpu = per_gpu_weight_bytes(model, row.dtype, tp, quantize_embeddings=True)
+        weights = decode_weight_bytes(
+            model, row.dtype, tp, row.concurrency, per_gpu, quantize_embeddings=True
+        )
         kv = kv_bytes_per_token_per_gpu(model, "fp8", tp)
         ctx = row.input_len + row.output_len / 2
         terms.append(
@@ -131,8 +145,35 @@ def physical_floor_s(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> float
         )
     tflops = dense_tflops(gpu, row.dtype)
     if tflops is not None:
-        terms.append(decode_compute_s(param_count(model), row.concurrency, tp, tflops, mfu=1.0))
+        terms.append(
+            decode_compute_s(active_param_count(model), row.concurrency, tp, tflops, mfu=1.0)
+        )
     return max(terms) if terms else None
+
+
+def row_problem(row: BenchmarkRow, model: ModelSpec, gpu: GPUSpec) -> str | None:
+    """Why `row` cannot be a measurement of `model` on `gpu`, or None: tensor parallelism
+    must divide the attention heads, and the implied time per token per sequence must not
+    beat the physical floor (`physical_floor_s`, which needs bandwidth or TFLOPS)."""
+    if model.num_attention_heads % row.tensor_parallel != 0:
+        return (
+            f"tensor_parallel {row.tensor_parallel} does not divide "
+            f"num_attention_heads {model.num_attention_heads}"
+        )
+    floor_s = physical_floor_s(row, model, gpu)
+    if floor_s is None:
+        return (
+            f"gpu {row.gpu_id} has neither memory_bandwidth_gbps nor dense TFLOPS, "
+            "so the physical bound cannot be checked"
+        )
+    implied_s = row.concurrency / row.output_tokens_per_s
+    if implied_s < floor_s:
+        return (
+            f"output_tokens_per_s {row.output_tokens_per_s:g} implies "
+            f"{implied_s * 1e3:.3f} ms per token per sequence, below the physical floor "
+            f"{floor_s * 1e3:.3f} ms"
+        )
+    return None
 
 
 def _check_row(
@@ -142,6 +183,8 @@ def _check_row(
     gpus: Mapping[str, GPUSpec],
     aliases: Mapping[str, str],
 ) -> None:
+    if row.source_url == USER_UPLOAD:
+        raise BenchmarkError(f"{where}: source_url {USER_UPLOAD!r} is reserved for uploads")
     if row.gpu_id not in gpus:
         raise BenchmarkError(f"{where}: unknown gpu_id {row.gpu_id!r}")
     if row.gpu_id != path.stem:
@@ -156,30 +199,15 @@ def _check_row(
         model = load_model(fixture)
     except CatalogError as exc:
         raise BenchmarkError(f"{where}: {exc}") from None
-    if model.num_attention_heads % row.tensor_parallel != 0:
-        raise BenchmarkError(
-            f"{where}: tensor_parallel {row.tensor_parallel} does not divide "
-            f"num_attention_heads {model.num_attention_heads}"
-        )
-    floor_s = physical_floor_s(row, model, gpus[row.gpu_id])
-    if floor_s is None:
-        raise BenchmarkError(
-            f"{where}: gpu {row.gpu_id} has neither memory_bandwidth_gbps nor dense TFLOPS, "
-            "so the physical bound cannot be checked"
-        )
-    implied_s = row.concurrency / row.output_tokens_per_s
-    if implied_s < floor_s:
-        raise BenchmarkError(
-            f"{where}: output_tokens_per_s {row.output_tokens_per_s:g} implies "
-            f"{implied_s * 1e3:.3f} ms per token per sequence, below the physical floor "
-            f"{floor_s * 1e3:.3f} ms"
-        )
+    problem = row_problem(row, model, gpus[row.gpu_id])
+    if problem is not None:
+        raise BenchmarkError(f"{where}: {problem}")
 
 
 def load_benchmarks(
     directory: Path | None = None, *, gpus: Mapping[str, GPUSpec] | None = None
 ) -> BenchmarkTable:
-    """Load and validate every `<gpu-id>.yaml` in `directory` (default `data/benchmarks`).
+    """Load and validate every `<gpu-id>.yaml` in `directory` (default: the shipped table).
 
     `gpus` is the FK target (default: the shipped GPU catalog). Raises `BenchmarkError`
     naming the file, row index, and `model_id` for a malformed row, an unknown GPU or

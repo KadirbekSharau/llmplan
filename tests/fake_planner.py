@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,7 @@ class FakePerf:
     ttft_ms_p95: float = 100.0
     tpot_ms_p95: float = 10.0
     prefill_tokens_per_s: float = 10_000.0
+    confidence: Literal["roofline", "interpolated", "measured"] = "measured"  # M8
 
 
 FAKE_PERF: dict[tuple[str, int], FakePerf] = {}
@@ -60,7 +62,7 @@ class FakeBackend:
             return None
         return PerfEstimate(
             backend="table",
-            confidence="measured",
+            confidence=spec.confidence,
             effective_batch=config.max_num_seqs,
             decode_tokens_per_s=spec.tokens_per_s,
             prefill_tokens_per_s=spec.prefill_tokens_per_s,

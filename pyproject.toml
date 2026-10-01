@@ -1,9 +1,26 @@
 [project]
 name = "llmplan"
-version = "0.1.0"
+version = "0.2.0"
 description = "CPU-only capacity planner for self-hosted LLM inference."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Kadirbek Sharau" }]
+keywords = ["llm", "inference", "capacity-planning", "vllm", "gpu", "milp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
@@ -18,6 +35,12 @@ dependencies = [
 
 [project.scripts]
 llmplan = "llmplan.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/KadirbekSharau/llmplan"
+Repository = "https://github.com/KadirbekSharau/llmplan"
+Issues = "https://github.com/KadirbekSharau/llmplan/issues"
+Changelog = "https://github.com/KadirbekSharau/llmplan/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -35,7 +58,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["llmplan"]
+packages = ["llmplan"]  # catalogs, fixtures and trace samples ship as llmplan/data (M8)
+exclude = ["llmplan/data/traces/.gitignore"]
 
 [tool.ruff]
 line-length = 100
@@ -65,10 +89,18 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
+[tool.coverage.report]
+# Streamlit page modules run only under the AppTest suite (marker `ui`, the `ui` CI job),
+# which gates them on its own (an explicit --omit replaces this list):
+#   coverage report --include='llmplan/ui/*' --omit='llmplan/ui/__init__.py' --fail-under=90
+omit = ["llmplan/ui/app.py", "llmplan/ui/views.py", "llmplan/ui/calibrate.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers -m 'not slow and not docker' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra --strict-markers -m 'not slow and not docker and not ui and not network' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
 markers = [
-    "slow: long-running performance tests; excluded by default, select with -m slow",
+    "slow: multi-second tests; excluded by default, select with -m slow",
     "docker: builds the Docker image (needs Docker and network); excluded by default, select with -m docker",
+    "ui: Streamlit AppTest suite (the `ui` CI job); excluded by default, select with -m ui",
+    "network: live Hugging Face checks run by hand before a release; excluded by default, select with -m network",
 ]

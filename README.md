@@ -1,32 +1,38 @@
 # llmplan — LLM Capacity Planner
 
+[![ci](https://github.com/KadirbekSharau/llmplan/actions/workflows/ci.yml/badge.svg)](https://github.com/KadirbekSharau/llmplan/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 CPU-only planner for self-hosted LLM inference: given a model, traffic, a latency target and
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
 
-Status: M1 to M7 implemented (model and GPU/price catalogs with exact VRAM fit, workload
-ingestion, performance model, MILP fleet planner with request-size demand classes, trace
-replay with a utilization timeline, and a Streamlit web UI). Documents drive the work:
+Status: v0.2.0 (M1 to M8): model and GPU/price catalogs with exact VRAM fit for dense and
+mixture-of-experts models, workload ingestion, a performance model that says how far to
+trust it and takes your own benchmark numbers, a MILP fleet planner with request-size demand
+classes, trace replay with a utilization timeline, and a Streamlit web UI.
 
-- [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
-- [docs/MILESTONES.md](docs/MILESTONES.md) — M0 to M7, acceptance criteria, review checklist
-- [docs/milestones/M1_DESIGN.md](docs/milestones/M1_DESIGN.md) — detailed design for the first milestone
-- [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) — rules every milestone must satisfy
-- [docs/FOUNDER_QUESTIONS.md](docs/FOUNDER_QUESTIONS.md) — decisions waiting on the founder
-- [docs/CTO_ASSESSMENT.md](docs/CTO_ASSESSMENT.md) — background reasoning (optional reading)
-- [docs/DEPLOY.md](docs/DEPLOY.md) — hosting the web UI (Docker, Streamlit Community Cloud)
-- [docs/LAUNCH.md](docs/LAUNCH.md) — launch checklist and draft posts
+## Install
 
-Implementing agents: start with PLAN.md, then ARCHITECTURE.md, then your milestone's design doc.
+```
+pip install llmplan        # once v0.2.0 is on PyPI; the catalogs and samples ship in the wheel
+llmplan fit --model Qwen/Qwen3-30B-A3B --gpu h100-sxm-80gb
+```
 
-## Usage
-
-From a checkout (catalogs and fixtures are read from `data/`):
+From a checkout (catalogs, fixtures and trace samples are package data under
+`llmplan/data/`):
 
 ```
 uv sync
 ```
+
+Every estimate states its confidence: `measured` or `interpolated` from published benchmark
+rows (the source and its date are named), or `roofline`, the uncalibrated first-principles
+model (expect ±30% on throughput). Give it your own `vllm bench serve` results with
+`--benchmarks` (CLI) or under "Calibrate with your own benchmarks" (web UI) and matching
+estimates become `measured (your upload)` for that run; nothing is stored.
+
+## Usage
 
 **`llmplan ui`** — the web UI: pick a model (a shipped fixture or a Hugging Face id), traffic
 (a bundled public trace sample, an uploaded CSV up to 50 MB, or synthetic), a p95
@@ -35,7 +41,14 @@ TTFT/TPOT target and GPU prices (editable), click Plan, and get the cheapest fle
 its reason, the assumptions, and JSON downloads. Nothing recomputes until Plan is clicked.
 Under Advanced, "Request-size classes" (default 2x2) plans each request size on the GPUs
 that meet the target for it; the results then show the routing table, each class's
-replayed latency, and the saving against sizing every replica for the mean request.
+replayed latency, and what sizing every replica for the mean request would cost and why
+(it misses the latency target in the replay, under-provisions the long-request class, or
+costs more). A banner above the cost says how much to trust the performance model, and
+"Calibrate with your own benchmarks" in the sidebar takes an llmplan CSV or a `vllm bench
+serve --save-result` JSON (5 MB, 500 rows; for a JSON also the GPU, tensor parallel, dtype
+and vLLM version), validates every row on Plan, lists the rejected ones with the reason,
+and offers a prefilled GitHub issue to contribute the valid rows (nothing is sent
+automatically).
 
 ```
 uv run llmplan ui
@@ -46,7 +59,7 @@ Options: `--port 8501`, `--address localhost` (`0.0.0.0` in a container), `--hea
 gated models, and `LLMPLAN_USAGE_LOG=PATH` enables the anonymous usage log (fields listed in
 the page footer and docs/DEPLOY.md). Limits: 50 MB uploads (refused before parsing), a 30 s
 solver time limit, 200,000 simulated requests, 30 plans per hour per session. The presets
-are samples of the Azure 2023/2024 and BurstGPT traces in `data/traces/samples/` (CC-BY-4.0;
+are samples of the Azure 2023/2024 and BurstGPT traces in `llmplan/data/traces/samples/` (CC-BY-4.0;
 see its README). Docker: `docker build -t llmplan . && docker run --rm -p 8501:8501
 llmplan`; hosting steps in docs/DEPLOY.md.
 
@@ -61,15 +74,19 @@ Options: `--dtype {fp32,bf16,fp16,fp8,int8,int4}`, `--kv-dtype {bf16,fp16,fp8}`,
 `--context 8192`, `--gpu-mem-util 0.9`, `--max-num-batched-tokens 8192`,
 `--param-count-override N`, `--gpus PATH`, `--format {text,json}`. `--model` also accepts a
 Hugging Face repo id (`org/name`); gated repos need `HF_TOKEN` in the environment.
+Supported families: Llama, Mistral, Qwen2, Qwen3 (dense) and Mixtral, Qwen2-MoE, Qwen3-MoE
+(mixture of experts: every expert counts toward the weights, only the active ones toward
+compute). DeepSeek V2/V3 (multi-head latent attention) are reported as unsupported.
 
 **`llmplan model-info`** — architecture integers, exact parameter count, KV bytes per token,
 and weight size in every dtype.
 
 ```
 uv run llmplan model-info --model fixture:qwen2.5-7b
+uv run llmplan model-info --model fixture:qwen3-30b-a3b   # MoE: adds an Experts line with active params
 ```
 
-**`llmplan gpus`** — the GPU catalog (`data/gpus.yaml`, or `--gpus PATH`).
+**`llmplan gpus`** — the GPU catalog (`llmplan/data/gpus.yaml`, or `--gpus PATH`).
 
 ```
 uv run llmplan gpus --format json
@@ -98,7 +115,7 @@ uv run llmplan workload synth --rps 5 --duration 3600 --in-tokens lognormal:6.2:
 Token distributions: `fixed:N`, `lognormal:MEAN:SIGMA[:LO:HI]` (parameters of the underlying
 normal), `uniform:LO:HI`.
 
-**`llmplan traces fetch`** — download a public trace listed in `data/traces/manifest.yaml`
+**`llmplan traces fetch`** — download a public trace listed in `llmplan/data/traces/manifest.yaml`
 (`azure2023-code`, `azure2023-conv`, `azure2024-code`, `azure2024-conv`, `burstgpt-1`). It
 refuses to run without `--yes`, verifies the recorded SHA-256, and caps downloads at 2 GiB.
 
@@ -108,9 +125,10 @@ uv run llmplan traces fetch azure2023-conv --dest ~/traces --yes
 
 **`llmplan perf estimate`** — throughput, TTFT, and TPOT of one replica under a workload's
 token distribution. `--backend auto` (default) interpolates published benchmark rows
-(`data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request
-shape, and otherwise falls back to a roofline bound; the output states the backend,
-confidence (`measured`, `interpolated`, or `roofline`), assumptions, and sources.
+(`llmplan/data/benchmarks/`) when they match the model, GPU, tensor parallelism, dtype, and request
+shape, and otherwise falls back to a roofline bound; the output states the backend, a
+`Confidence` line (`measured`, `interpolated`, or `roofline`, with the source and its date
+or the roofline caveat), assumptions, and sources.
 
 ```
 uv run llmplan perf estimate --model fixture:llama3-70b --gpu h100-sxm-80gb --tp 4 \
@@ -118,13 +136,25 @@ uv run llmplan perf estimate --model fixture:llama3-70b --gpu h100-sxm-80gb --tp
 ```
 
 Options: `--dtype`, `--max-num-seqs 256`, `--max-model-len 8192`,
-`--backend {auto,roofline,table}`, `--format {text,json}`. Pass either all six token
+`--backend {auto,roofline,table}`, `--format {text,json}`, `--benchmarks PATH` (your rows:
+an llmplan CSV or a `vllm bench serve --save-result` JSON; a JSON's GPU, tensor parallel
+and dtype default to this replica's, `--benchmarks-gpu`, `--benchmarks-tp`,
+`--benchmarks-dtype`, `--benchmarks-engine-version` override them; rows used and
+rejected are reported on stderr):
+
+```
+uv run llmplan perf estimate --model fixture:llama3-8b --gpu h100-sxm-80gb --dtype fp8 \
+  --max-num-seqs 64 --in-mean 1000 --in-p50 1000 --in-p95 1000 --out-mean 200 --out-p50 200 \
+  --out-p95 200 --benchmarks tests/fixtures/m8/benchmarks_3_rows.csv
+```
+
+Pass either all six token
 statistics or `--trace PATH`, which computes them from a trace as `llmplan workload stats`
 does (`uv run llmplan perf estimate --model fixture:llama3-8b --gpu l40s-48gb --trace
 tests/fixtures/workload_10.csv`). Latencies are service times without queueing.
 
 **`llmplan perf benchmarks`** — the shipped benchmark rows, optionally filtered by GPU and
-model (fixture ids match through `data/benchmarks/aliases.yaml`).
+model (fixture ids match through `llmplan/data/benchmarks/aliases.yaml`).
 
 ```
 uv run llmplan perf benchmarks --gpu h100-sxm-80gb --model fixture:llama3-8b
@@ -148,19 +178,25 @@ h100-sxm-80gb,l40s-48gb`, `--providers aws,lambda`, `--tp 1,2,4,8`, `--dtypes bf
 `--max-num-seqs 32,64,128,256`, `--homogeneous`, `--perf-backend {auto,roofline,table}`,
 `--solver {highs,cp_sat,scip,gurobi}` (SCIP and Gurobi only when OR-Tools can load them),
 `--time-limit 60`, `--gpu-catalog PATH`, `--prices PATH`, `--format {text,json,vllm}`,
+`--benchmarks PATH` with `--benchmarks-gpu ID` (required for a vLLM JSON),
+`--benchmarks-tp N`, `--benchmarks-dtype D`, `--benchmarks-engine-version V` (your
+benchmark rows for this run, as in `perf estimate`),
 `--classes {1,2x2,3x3,...,fixed:<input edges>/<output edges>}` (request-size classes,
 needs `--trace`; default `1`, one class sized for the mean request). Solves are
 single-threaded and seeded, so the JSON output is byte-identical across runs. The fleet is
-sized for the peak window only (no autoscaling yet).
+sized for the peak window only (no autoscaling yet). A `Confidence` line under `Cost` says
+which performance model backs the chosen replicas.
 
 With classes, the trace is cut into input x output token bins (`2x2`: median splits;
 `fixed:1024,4096/256`: your edges, inclusive upper bounds), each class is estimated at its
 own request shape and served only by candidates that meet the SLO for it, and the output
-adds a class table and a routing table (the share of each class's requests per replica
-type):
+adds a "Request-size routing" sentence comparing the plan with the same request sized for
+the mean request (whose fleet is replayed on the trace), a class table and a routing table
+(the share of each class's requests per replica type); the JSON adds a `class_comparison`
+object:
 
 ```
-uv run llmplan plan --model fixture:llama3-8b --trace data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
+uv run llmplan plan --model fixture:llama3-8b --trace llmplan/data/traces/samples/azure2024_conv.csv --max-model-len 8192 --ttft-p95-ms 500 --tpot-p95-ms 50 --classes 2x2
 ```
 
 **`llmplan simulate`** — replay a trace on a planned fleet and show what it does over time:
@@ -193,21 +229,26 @@ TRACE`. The JSON output is byte-identical across runs.
 Exit codes: 0 success, 1 no performance estimate possible (`perf estimate`), 2
 usage/validation, 3 catalog/fetch error (including invalid benchmark rows), 4 no feasible
 plan, 5 solver error. Shipped fixtures:
-`fixture:llama3-70b`, `fixture:llama3-8b`, `fixture:mistral-7b-v0.1`, `fixture:qwen2.5-7b`.
+`fixture:llama3-70b`, `fixture:llama3-8b`, `fixture:mistral-7b-v0.1`, `fixture:qwen2.5-7b`,
+`fixture:mixtral-8x7b`, `fixture:qwen3-30b-a3b`.
 
 ## Development
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```
-uv sync --locked
+uv sync --locked --all-extras
 uv run ruff check . && uv run ruff format --check .
 uv run mypy --strict llmplan
-uv run pytest            # includes coverage (fails under 90%)
-uv run pytest -m slow --no-cov   # 200k-request replay and every UI preset, excluded by default
-uv run pytest -m docker --no-cov # docker build (M6 9.7), excluded by default; skipped without Docker
+uv run pytest            # unit + acceptance (CI job `check`), coverage gate 90%
+uv run pytest -m ui      # Streamlit AppTest suite (CI job `ui`)
+uv run pytest -m slow --no-cov     # multi-second tests: 200k-request replay, every UI preset,
+                                   # the wheel install test (needs uv and network)
+uv run pytest -m docker --no-cov   # docker build (M6 9.7); skipped without Docker
+uv run pytest -m network tests/live --no-cov -v -s   # live Hugging Face configs, by hand
 uv audit
-uv build
+uv build && uv run python scripts/wheel_smoke.py dist/*.whl   # clean-venv install test
+uv run python scripts/check_secrets.py                        # secrets scan of the history
 ```
 
 The web UI tests run headless and offline with `streamlit.testing.v1.AppTest`. The M7
@@ -216,3 +257,21 @@ scripts/melange_crosscheck.py --melange-dir DIR` on a checkout of melange-releas
 (docs/milestones/M7_NOTES.md). The bundled
 trace samples are regenerated with `uv run python scripts/make_samples.py TRACES_DIR` from
 the full traces (`llmplan traces fetch NAME --dest TRACES_DIR --yes`, outside the repo).
+
+## Project documents
+
+- [docs/OVERVIEW.md](docs/OVERVIEW.md) — what llmplan is, in one place (read first)
+- [docs/PLAN.md](docs/PLAN.md) — what, why, goals, non-goals, principles
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engineering standards, package layout, data models, interfaces
+- [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/MILESTONES.md](docs/MILESTONES.md) — what is next, what shipped
+- [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) — rules every milestone must satisfy
+- [docs/DEPLOY.md](docs/DEPLOY.md) — hosting the web UI, publishing to PyPI
+- [docs/milestones/](docs/milestones/) — design and implementation notes per milestone
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The bundled trace samples
+in `llmplan/data/traces/samples/` are excerpts of the Azure LLM inference traces and
+BurstGPT, redistributed under CC-BY-4.0 with attribution in NOTICE. Security reports:
+[SECURITY.md](SECURITY.md). Contributions, including your own benchmark rows:
+[CONTRIBUTING.md](CONTRIBUTING.md).

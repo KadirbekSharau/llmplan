@@ -19,7 +19,7 @@ from llmplan.catalog.models import ModelSpec
 from llmplan.errors import PerfError
 from llmplan.memory.engine import EngineProfile
 from llmplan.memory.fit import FitRequest, FitResult, fit
-from llmplan.perf import PerfEstimate, ReplicaConfig, estimate
+from llmplan.perf import PerfBackend, PerfEstimate, ReplicaConfig, estimate
 from llmplan.planner.request import SLO, PlanOptions, PlanRequest
 from llmplan.planner.result import CandidateEval, Status
 from llmplan.types import DType
@@ -73,9 +73,14 @@ def _tp_problem(model: ModelSpec, row: PriceRow, tp: int) -> tuple[Status, str] 
 
 
 def evaluate_one(
-    request: PlanRequest, row: PriceRow, gpu: GPUSpec, config: ReplicaConfig
+    request: PlanRequest,
+    row: PriceRow,
+    gpu: GPUSpec,
+    config: ReplicaConfig,
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> CandidateEval:
-    """Run the section 4 checks for one candidate and return its evaluation."""
+    """Run the section 4 checks for one candidate and return its evaluation. `backends`
+    overrides perf backends as in `llmplan.perf.estimate` (M8: uploaded rows)."""
     model, slo, tp = request.model, request.slo, config.tensor_parallel
     problem = _tp_problem(model, row, tp)
     if problem is not None:
@@ -98,7 +103,14 @@ def evaluate_one(
         )
         return _rejected(row, config, "no_fit", reason, fit_result, replicas)
     try:
-        perf = estimate(model, gpu, config, request.stats, backend=request.options.perf_backend)
+        perf = estimate(
+            model,
+            gpu,
+            config,
+            request.stats,
+            backend=request.options.perf_backend,
+            backends=backends,
+        )
     except PerfError as exc:
         return _rejected(row, config, "no_perf", str(exc), fit_result, replicas)
     rejected = slo_status(perf, slo)
@@ -145,12 +157,21 @@ def replica_config(
 
 
 def evaluate_candidates(
-    request: PlanRequest, rows: Sequence[PriceRow], gpus: Mapping[str, GPUSpec]
+    request: PlanRequest,
+    rows: Sequence[PriceRow],
+    gpus: Mapping[str, GPUSpec],
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> tuple[CandidateEval, ...]:
     """Evaluate every row x tp x dtype x max_num_seqs combination, in enumeration order."""
     opts = request.options
     return tuple(
-        evaluate_one(request, row, gpus[row.gpu_id], replica_config(request.engine, opts, *choice))
+        evaluate_one(
+            request,
+            row,
+            gpus[row.gpu_id],
+            replica_config(request.engine, opts, *choice),
+            backends,
+        )
         for row in rows
         for choice in itertools.product(
             opts.tensor_parallel_choices, opts.dtype_choices, opts.max_num_seqs_choices

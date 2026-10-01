@@ -1,11 +1,10 @@
 """llmplan web UI (M6): pick a model, traffic, a latency target and prices; get the cheapest
 fleet, its vLLM command lines and the utilization timeline.
 
-Run with `llmplan ui` (or `streamlit run llmplan/ui/app.py`). The page holds no planning
-logic: every result comes from `llmplan.*` through `llmplan.ui.state`, and results are
-recomputed only when Plan is clicked. Each plan run is logged by `usage_log` when enabled.
-Limits (M6_DESIGN.md section 6): 50 MB uploads checked before parsing, a 30 s solver limit,
-200,000 simulated requests, and 30 plans per hour per session.
+Run with `llmplan ui`. The page holds no planning logic: results come from `llmplan.*`
+through `llmplan.ui.state` (M8: own benchmarks through `llmplan.ui.calibrate`), recomputed
+only on Plan, and logged by `usage_log` when enabled. Limits (M6_DESIGN.md section 6): 50 MB
+uploads checked before parsing, 30 s solver limit, 200,000 requests, 30 plans per hour.
 """
 
 from __future__ import annotations
@@ -24,10 +23,11 @@ from llmplan import render
 from llmplan.catalog.hardware import GPUSpec, PriceRow, load_gpus, load_prices
 from llmplan.catalog.models import FIXTURE_PREFIX, ModelSpec, load_model
 from llmplan.errors import InfeasiblePlan, LLMPlanError, ValidationError
+from llmplan.perf.uploads import upload_backends
 from llmplan.planner import SLO, PlanRequest, PlanResult
 from llmplan.simulate import SimOptions
 from llmplan.types import Commitment, DType
-from llmplan.ui import presets, state, usage_log, views
+from llmplan.ui import calibrate, presets, state, usage_log, views
 from llmplan.workload import (
     InMemoryTrace,
     Workload,
@@ -66,6 +66,7 @@ class Inputs:
     solver: str
     time_limit_s: float
     classes: str
+    benchmarks: calibrate.BenchmarkFile | None
 
 
 @st.cache_resource(show_spinner=False)
@@ -92,8 +93,9 @@ def _run(
     _workload: Workload,
     _options: SimOptions,
     _gpus: Mapping[str, GPUSpec],
+    _rows: calibrate.Rows,
 ) -> state.PlanRun:
-    return state.run_plan(_request, _workload, _options, _gpus)
+    return state.run_plan(_request, _workload, _options, _gpus, upload_backends(_rows))
 
 
 def _fail(message: str) -> Callable[[], Workload]:
@@ -273,6 +275,7 @@ def _sidebar() -> Inputs:
             time_limit = st.number_input(
                 "Solver time limit (s)", 1.0, presets.MAX_TIME_LIMIT_S, presets.DEFAULT_TIME_LIMIT_S
             )
+        benchmarks = calibrate.sidebar(_catalogs()[0], presets.DTYPE_CHOICES)
     return Inputs(
         model_id=model_id,
         workload=workload,
@@ -288,6 +291,7 @@ def _sidebar() -> Inputs:
         solver=solver,
         time_limit_s=time_limit,
         classes=classes,
+        benchmarks=benchmarks,
     )
 
 
@@ -302,6 +306,7 @@ def _resolve_model(model_id: str) -> ModelSpec:
 def _plan(inputs: Inputs, seen: dict[str, WorkloadStats]) -> state.PlanRun:
     gpus, _ = _catalogs()
     model = _resolve_model(inputs.model_id)
+    rows = calibrate.rows_for_plan(inputs.benchmarks, model, gpus)
     workload = inputs.workload()
     stats = seen["stats"] = compute_stats(workload)
     request = state.build_request(
@@ -322,7 +327,8 @@ def _plan(inputs: Inputs, seen: dict[str, WorkloadStats]) -> state.PlanRun:
         classes=classify_spec(workload, inputs.classes),
     )
     options = state.sim_options(stats)
-    return _run(state.cache_key(request, options, workload), request, workload, options, gpus)
+    key = state.cache_key(request, options, workload, rows)
+    return _run(key, request, workload, options, gpus, rows)
 
 
 def _on_plan(inputs: Inputs) -> tuple[str, object]:
@@ -372,17 +378,13 @@ def main() -> None:
     """The page: sidebar inputs, one Plan button, and the last outcome."""
     st.set_page_config(page_title="llmplan", layout="wide")
     inputs = _sidebar()
-    st.title("llmplan")
-    st.caption(
-        "The cheapest GPU fleet and vLLM settings for your model, traffic and latency target, "
-        "with a replay of the traffic on that fleet. CPU-only planning; nothing connects to a "
-        "GPU or your cluster."
-    )
+    views.header()
     if st.button("Plan", type="primary", key="plan"):
         st.session_state["outcome"] = _on_plan(inputs)
     kind, value = st.session_state.get("outcome", ("none", None))
     if kind == "run" and isinstance(value, state.PlanRun):
         views.results(value)
+        calibrate.report()
     elif kind == "error":
         st.error(str(value))
     elif kind == "warning":

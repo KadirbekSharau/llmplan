@@ -1,7 +1,8 @@
 """Table backend: interpolation over published benchmark rows (M3_DESIGN.md section 5.3).
 
-Rows are matched on (model, GPU, tensor parallel, dtype), narrowed to one engine and to the
-request shape nearest the workload's mean, then interpolated linearly in log(concurrency) at
+Rows are matched on (model, GPU, tensor parallel, dtype) (uploaded rows, M8, answer before
+shipped ones of the same match), narrowed to one engine and to the request shape nearest the
+workload's mean, then interpolated linearly in log(concurrency) at
 the replica's effective batch. The backend never extrapolates request shape.
 """
 
@@ -13,17 +14,17 @@ from typing import Literal
 
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.catalog.models import ModelSpec
-from llmplan.perf.benchmarks import BenchmarkRow, BenchmarkTable, default_table
+from llmplan.perf.benchmarks import USER_UPLOAD, BenchmarkRow, BenchmarkTable, default_table
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate, StatsLike, register
 from llmplan.perf.roofline import (
     P95_FACTOR,
     SERVICE_NOTE,
+    active_param_count,
     avg_ctx_tokens,
     dense_tflops,
     effective_batch,
     fit_or_reason,
-    param_count,
     prefill_tokens_per_s,
     tflops_field,
 )
@@ -121,12 +122,31 @@ def _evaluate(
     config: ReplicaConfig,
     stats: StatsLike,
 ) -> PerfEstimate | str:
+    """M8: uploaded rows (`source_url == "user-upload"`) describe the visitor's own setup,
+    so they answer first; the shipped rows of the same match are used only when the
+    uploaded ones cannot (e.g. no shape within 2x of the workload)."""
     rows = _matching_rows(table, model, gpu, config)
     if not rows:
         return (
             f"no benchmark rows for {model.id} on {gpu.id} at tensor_parallel "
             f"{config.tensor_parallel}, dtype {config.dtype}"
         )
+    uploaded = [row for row in rows if row.source_url == USER_UPLOAD]
+    shipped = [row for row in rows if row.source_url != USER_UPLOAD]
+    if uploaded:
+        mine = _from_rows(uploaded, model, gpu, config, stats)
+        if isinstance(mine, PerfEstimate) or not shipped:
+            return mine
+    return _from_rows(shipped, model, gpu, config, stats)
+
+
+def _from_rows(
+    rows: Sequence[BenchmarkRow],
+    model: ModelSpec,
+    gpu: GPUSpec,
+    config: ReplicaConfig,
+    stats: StatsLike,
+) -> PerfEstimate | str:
     fit = fit_or_reason(model, gpu, config)
     if isinstance(fit, str):
         return fit
@@ -177,7 +197,7 @@ def _evaluate(
         tflops = dense_tflops(gpu, config.dtype)
         if tflops is None:
             return f"rows carry no TTFT and gpu {gpu.id} has {tflops_field(config.dtype)} null"
-        prefill = prefill_tokens_per_s(tflops, config.tensor_parallel, param_count(model))
+        prefill = prefill_tokens_per_s(tflops, config.tensor_parallel, active_param_count(model))
         notes.append("prefill rate from the roofline model (rows carry no TTFT)")
     notes.append(SERVICE_NOTE)
     service_s = stats.input_tokens_mean / prefill + stats.output_tokens_mean * tpot_p50 / 1e3
@@ -201,7 +221,7 @@ def _evaluate(
 class TableBackend:
     """Interpolates published benchmark rows; `None` when no row matches closely enough.
 
-    `table` defaults to the shipped, validated `data/benchmarks` table (loaded on first use).
+    `table` defaults to the shipped, validated benchmark table (loaded on first use).
     Confidence is `"measured"` on an exact concurrency hit, `"interpolated"` otherwise.
     """
 

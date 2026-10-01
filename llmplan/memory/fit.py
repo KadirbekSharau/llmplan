@@ -94,6 +94,11 @@ def _notes(req: FitRequest) -> tuple[str, ...]:
         )
     if spec.param_count_override is not None:
         notes.append(f"param_count_override {spec.param_count_override} used (not derived)")
+    if spec.num_experts:
+        notes.append(
+            f"mixture of experts: all {spec.num_experts} experts resident"
+            + (", split evenly across tensor-parallel GPUs" if req.tensor_parallel > 1 else "")
+        )
     return tuple(notes)
 
 

@@ -3,7 +3,54 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
+
+Launch readiness (M8). Tagged by the CTO after review; the repository then goes public.
+
+### Added
+
+- Confidence everywhere: `PlanResult.perf_confidence` (`measured`, `interpolated`,
+  `roofline` or `mixed`) and `perf_sources`; a `Confidence` line under `Cost` in `llmplan
+  plan` and under `Backend` in `llmplan perf estimate`, naming the benchmark page and its
+  date or saying the roofline model is uncalibrated (expect ±30% on throughput); a
+  warning or info banner in the web UI with the roofline constants.
+- Calibrate with your own benchmarks: llmplan CSV and `vllm bench serve --save-result`
+  JSON uploads (field names checked against vLLM v0.30.0), validated row by row like
+  shipped rows, used for one run through `plan(..., backends=)` and never written or
+  logged; `--benchmarks` and `--benchmarks-{gpu,tp,dtype,engine-version}` on `llmplan
+  plan` and `llmplan perf estimate`; a web UI section with a per-row report and a
+  prefilled GitHub issue to contribute the rows.
+- Mixture-of-experts models: `mixtral` and `qwen_moe` (Qwen2-MoE, Qwen3-MoE)
+  architectures, `ModelSpec` expert fields, `DerivedModelInfo.active_param_count`;
+  weights count every expert, the roofline computes with active parameters and reads the
+  experts a batch touches; fixtures `mixtral-8x7b` and `qwen3-30b-a3b`. DeepSeek V2/V3 are
+  reported as unsupported (MLA).
+- Live Hugging Face checks (`tests/live`, marker `network`, run by hand before a release).
+- Packaging: catalogs, fixtures, benchmark rows and trace samples ship in the wheel
+  (`llmplan/data/`, `llmplan/paths.py`); `scripts/wheel_smoke.py` installs the wheel in a
+  clean environment and runs the CLI outside the checkout (CI and `test_wheel_smoke`);
+  `.github/workflows/release.yml` publishes to PyPI by trusted publishing on a `v*` tag
+  (skipped until configured; docs/DEPLOY.md) and creates the GitHub release.
+- Apache-2.0 `LICENSE`, `NOTICE` (CC-BY-4.0 trace samples), `SECURITY.md`,
+  `CONTRIBUTING.md`, license metadata and classifiers; `scripts/check_secrets.py` scans the
+  git history for committed secrets.
+
+### Changed
+
+- The request-size routing result is a sentence comparing the class plan with the same
+  request sized for the mean request (whose fleet is replayed on the trace), in the UI and
+  in `llmplan plan --classes` (text, and a `class_comparison` object in JSON); no
+  percentage is ever printed negative.
+- The data directory moved from `data/` to `llmplan/data/`; the repository-relative
+  fallback is gone.
+- `BenchmarkRow.source_url` accepts `user-upload` (rejected in shipped tables);
+  `llmplan.planner.plan` and `llmplan.ui.state.run_plan` take `backends=`; the `plan`
+  renderer method takes an optional comparison.
+- CI runs two jobs, `check` (default test selection) and `ui` (the Streamlit AppTest suite
+  with its own coverage gate, then the `slow` tests); multi-second tests moved to `slow`.
+- Version 0.2.0.
+
+## [0.1.0] - 2026-10-01
 
 ### Added
 

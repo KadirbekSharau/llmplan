@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from llmplan.catalog.hardware import GPUSpec
 from llmplan.errors import PerfError
-from llmplan.perf import PerfEstimate, ReplicaConfig, estimate
+from llmplan.perf import PerfBackend, PerfEstimate, ReplicaConfig, estimate
 from llmplan.planner.candidates import Column, slo_status
 from llmplan.planner.request import PlanRequest
 from llmplan.planner.result import CandidateEval, RoutingRule, Status, count_statuses
@@ -43,10 +43,21 @@ def demands(request: PlanRequest) -> tuple[tuple[float, float], ...]:
 
 
 def _evaluate(
-    request: PlanRequest, gpu: GPUSpec, config: ReplicaConfig, demand: DemandClass
+    request: PlanRequest,
+    gpu: GPUSpec,
+    config: ReplicaConfig,
+    demand: DemandClass,
+    backends: Mapping[str, PerfBackend] | None,
 ) -> ClassEval:
     try:
-        perf = estimate(request.model, gpu, config, demand, backend=request.options.perf_backend)
+        perf = estimate(
+            request.model,
+            gpu,
+            config,
+            demand,
+            backend=request.options.perf_backend,
+            backends=backends,
+        )
     except PerfError as exc:
         return ClassEval(None, "no_perf", str(exc))
     rejected = slo_status(perf, request.slo)
@@ -56,10 +67,14 @@ def _evaluate(
 
 
 def evaluate_classes(
-    request: PlanRequest, candidates: Sequence[CandidateEval], gpus: Mapping[str, GPUSpec]
+    request: PlanRequest,
+    candidates: Sequence[CandidateEval],
+    gpus: Mapping[str, GPUSpec],
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> tuple[tuple[ClassEval, ...] | None, ...]:
     """Per candidate, its evaluation on every class of `request` (None for candidates
-    rejected before the performance step: tensor parallelism or memory)."""
+    rejected before the performance step: tensor parallelism or memory). `backends`
+    overrides perf backends as in `llmplan.perf.estimate`."""
     cache: dict[tuple[str, ReplicaConfig, int], ClassEval] = {}
     out: list[tuple[ClassEval, ...] | None] = []
     for c in candidates:
@@ -71,7 +86,7 @@ def evaluate_classes(
         for demand in request.classes:
             key = (gpu.id, c.config, demand.index)
             if key not in cache:
-                cache[key] = _evaluate(request, gpu, c.config, demand)
+                cache[key] = _evaluate(request, gpu, c.config, demand, backends)
             evals.append(cache[key])
         out.append(tuple(evals))
     return tuple(out)

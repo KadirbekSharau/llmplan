@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from llmplan.planner.request import PlanRequest
     from llmplan.planner.result import PlanResult
     from llmplan.simulate import Timeline
+    from llmplan.simulate.compare import ClassComparison
     from llmplan.workload import Workload, WorkloadStats
 
 
@@ -47,7 +48,12 @@ class Renderer(Protocol):
 
     def benchmarks(self, rows: Sequence[BenchmarkRow]) -> str: ...
 
-    def plan(self, request: PlanRequest, result: PlanResult) -> str: ...
+    def plan(
+        self,
+        request: PlanRequest,
+        result: PlanResult,
+        comparison: ClassComparison | None = None,
+    ) -> str: ...
 
     def timeline(self, timeline: Timeline) -> str: ...
 

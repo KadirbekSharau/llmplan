@@ -21,6 +21,8 @@ from streamlit.testing.v1 import AppTest
 import llmplan.workload
 from llmplan.ui import presets
 
+pytestmark = pytest.mark.ui  # M8 9b: the Streamlit AppTest suite runs in the `ui` CI job
+
 APP = Path(__file__).resolve().parents[2] / "llmplan" / "ui" / "app.py"
 PLAN_TIMEOUT_S = 60
 H100 = "h100-sxm-80gb"

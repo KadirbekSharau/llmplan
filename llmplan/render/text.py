@@ -11,6 +11,7 @@ from llmplan.memory.fit import FitRequest, FitResult
 from llmplan.memory.kv_cache import kv_bytes_per_token_total
 from llmplan.memory.weights import model_info, weight_bytes
 from llmplan.perf.benchmarks import BenchmarkRow
+from llmplan.perf.confidence import confidence_sentence
 from llmplan.perf.config import ReplicaConfig
 from llmplan.perf.estimate import PerfEstimate, StatsLike
 from llmplan.planner.request import PlanRequest
@@ -20,6 +21,7 @@ from llmplan.render.plan_text import plan_text
 from llmplan.render.timeline_text import timeline_text
 from llmplan.render.workload_text import workload_stats_text
 from llmplan.simulate import Timeline
+from llmplan.simulate.compare import ClassComparison
 from llmplan.workload import Workload, WorkloadStats
 
 LABEL_WIDTH = 10
@@ -39,6 +41,20 @@ def _fixed(n_bytes: int) -> str:
 
 def _heads(spec: ModelSpec) -> str:
     return f"{spec.attention.upper()} {spec.num_attention_heads}/{spec.num_kv_heads} heads"
+
+
+def _experts(spec: ModelSpec, active: int, width: int) -> list[str]:
+    """M8: one model-info line for a mixture of experts (none for a dense model)."""
+    if not spec.num_experts:
+        return []
+    shared = spec.shared_expert_intermediate_size
+    return [
+        f"{'Experts':<{width}}{spec.num_experts} x {spec.moe_intermediate_size:,} wide, "
+        f"{spec.experts_per_token} per token, on {len(spec.moe_layer_indices)} of "
+        f"{spec.num_layers} layers"
+        + (f", shared expert {shared:,}" if shared else "")
+        + f"   active {active:,} ({active / 1e9:.2f}B) params per token"
+    ]
 
 
 def _opt(value: float | None, unit: str) -> str:
@@ -106,6 +122,7 @@ class TextRenderer:
             f"{'Params':<{width}}{info.param_count:,} ({info.param_count / 1e9:.2f}B)"
             + ("  [override]" if spec.param_count_override is not None else ""),
             f"{'Attention':<{width}}{_heads(spec)}, head_dim {spec.head_dim}",
+            *_experts(spec, info.active_param_count, width),
             f"{'Layers':<{width}}{spec.num_layers}   hidden {spec.hidden_size:,}   "
             f"intermediate {spec.intermediate_size:,}   vocab {spec.vocab_size:,}",
             f"{'Context':<{width}}max_position_embeddings {spec.max_position_embeddings:,}   "
@@ -157,6 +174,7 @@ class TextRenderer:
                 f"{stats.output_tokens_p50:g} / p95 {stats.output_tokens_p95:g} tokens",
             ),
             _line("Backend", f"{r.backend}  (confidence: {r.confidence})"),
+            f"Confidence  {confidence_sentence(r.confidence, r.source_urls)}",
             _line("Batch", f"{r.effective_batch:,} concurrent sequences"),
             _line(
                 "Decode",
@@ -194,8 +212,13 @@ class TextRenderer:
         lines.extend(f"source: {url} (as of {as_of})" for url, as_of in sources)
         return "\n".join(lines) + "\n"
 
-    def plan(self, request: PlanRequest, result: PlanResult) -> str:
-        return plan_text(request, result)
+    def plan(
+        self,
+        request: PlanRequest,
+        result: PlanResult,
+        comparison: ClassComparison | None = None,
+    ) -> str:
+        return plan_text(request, result, comparison)
 
     def timeline(self, timeline: Timeline) -> str:
         return timeline_text(timeline)

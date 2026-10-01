@@ -38,7 +38,9 @@ small, readable, and safe.
 
 **Secure**
 - The only external inputs are: Hugging Face config.json, user-uploaded CSV traces, YAML
-  catalogs, and CLI/UI arguments. Each is validated by schema before use.
+  catalogs, CLI/UI arguments, and (M8) user-uploaded benchmark files (llmplan CSV or vLLM
+  benchmark JSON, 5 MB / 500 rows, validated row by row, kept in memory for one session
+  and never written or logged). Each is validated by schema before use.
 - YAML is loaded with `yaml.safe_load` only. No `pickle`, no `eval`, no `exec`, no
   `subprocess` in the package.
 - Hugging Face fetches go only to `https://huggingface.co/<org>/<name>/resolve/<rev>/config.json`
@@ -46,7 +48,7 @@ small, readable, and safe.
   the environment (`HF_TOKEN`), never from a file we write, never logged.
 - Uploaded traces are size-capped (50 MB in the web UI, checked before parsing; never written to disk), parsed with an explicit column schema,
   and never executed or templated.
-- No secrets in the repo. `data/` contains only public catalog data with source URLs.
+- No secrets in the repo. `llmplan/data/` contains only public catalog data with source URLs.
 - Dependencies pinned in `uv.lock`; `pip-audit` (or `uv audit`) runs in CI.
 - Logging never includes tokens, file contents, or full user traces; log shapes and counts.
 
@@ -66,8 +68,8 @@ small, readable, and safe.
 
 ```
                     +-------------------+      +----------------------+
-  HF config.json -->|  catalog.models   |      |  catalog.hardware    |<-- data/gpus.yaml
-  (or fixture)      |  ModelSpec        |      |  GPUSpec, PriceRow   |<-- data/prices.yaml
+  HF config.json -->|  catalog.models   |      |  catalog.hardware    |<-- gpus.yaml
+  (or fixture)      |  ModelSpec        |      |  GPUSpec, PriceRow   |<-- prices.yaml
                     +---------+---------+      +----------+-----------+
                               |                           |
                               v                           v
@@ -106,13 +108,14 @@ There is no shared mutable state and no database in v1.
 llmplan/
   __init__.py            # version only
   errors.py              # exception hierarchy (section 7)
+  paths.py               # M8: package data paths via importlib.resources (no repo fallback)
   types.py               # shared Literal aliases: DType, KVDType, Attention, Commitment
   catalog/
     models.py            # ModelSpec + loaders (HF fetch behind protocol, fixtures)
     architectures/       # registry: per-architecture parameter/KV formulas
       __init__.py        # register(), get()
-      llama_like.py      # llama, mistral, qwen2, qwen3 (dense)
-      ...                # moe.py etc. added in later milestones
+      llama_like.py      # llama, mistral, qwen2, qwen3 (dense); per-part formulas shared
+      moe.py             # M8: mixtral, qwen_moe (Qwen2-MoE, Qwen3-MoE); MLA unsupported
     hardware.py          # GPUSpec, PriceRow, catalog loaders (YAML)
   memory/
     dtypes.py            # bytes-per-element table
@@ -137,6 +140,10 @@ llmplan/
     roofline.py          # roofline backend (first-principles bounds)
     benchmarks.py        # BenchmarkRow/BenchmarkTable, YAML loader, physical-bound check
     table.py             # benchmark-table interpolation backend
+    confidence.py        # M8: how much to trust an estimate (one sentence per confidence)
+    uploads.py           # M8: user benchmark rows (llmplan CSV, vLLM JSON) -> validated rows,
+                         #   upload_backends() = the backends= override for one plan
+    contribute.py        # M8: prefilled GitHub issue URL for contributing rows
     vidur.py             # optional Vidur backend (lazy import; not built in M3)
   planner/               # M4
     __init__.py          # plan() (M4 public API): validate, evaluate, prune, solve, explain
@@ -160,6 +167,8 @@ llmplan/
                          #   SimulationSummary, ClassSummary (M7), window aggregation (numpy)
     stepfn.py            # M7 (moved from timeline): window integrals/maxima of state logs,
                          #   step and piecewise-linear (incremental KV)
+    compare.py           # M8: ClassComparison, compare_single_class (a class plan against the
+                         #   same request sized for the mean request, replayed on the trace)
   render/                # output adapters: text table, JSON, vLLM command line, plots
     __init__.py          # Renderer protocol, register(), get()
     text.py              # M1
@@ -177,21 +186,24 @@ llmplan/
   cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
   cli_simulate.py        # M5: `llmplan simulate` command, registered in cli.py
   cli_ui.py              # M6: `llmplan ui` (Streamlit bootstrap in-process; lazy import)
-  ui/                    # M6: Streamlit app; thin. Only app.py and views.py import streamlit
+  ui/                    # M6: Streamlit app; thin. Only app.py, views.py and (M8) calibrate.py
+                         #   import streamlit
     app.py               # the page: sidebar inputs, one Plan button, last outcome (< 400 lines)
     views.py             # result sections rendered from library results
     state.py             # pure helpers: PlanRequest from inputs, PriceRow validation of the
                          #   edited table, cache key, run_plan (plan + replay), window, brake
     presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits
     usage_log.py         # opt-in JSON-lines usage log (LLMPLAN_USAGE_LOG)
-data/
-  gpus.yaml
-  prices.yaml
-  benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
-  fixtures/model_configs/*.json
-  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (full data files never committed)
-  traces/samples/        # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
-scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py
+    calibrate.py         # M8: "Calibrate with your own benchmarks" sidebar and report
+  data/                  # package data, shipped in the wheel (M8; was data/ at the repo root)
+    gpus.yaml
+    prices.yaml
+    benchmarks/          # M3: <gpu-id>.yaml rows, aliases.yaml
+    fixtures/model_configs/*.json
+    traces/manifest.yaml # M2: public trace URLs + SHA-256 (full data files never committed)
+    traces/samples/      # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
+scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py;
+                         #   M8: wheel_smoke.py (install test), check_secrets.py (history scan)
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -227,12 +239,18 @@ class ModelSpec(BaseModel, frozen=True):
     max_position_embeddings: int
     sliding_window: int | None  # informational in M1
     param_count_override: int | None   # user-supplied when architecture unsupported
+    num_experts: int = 0                # M8 mixture of experts (0: dense): routed experts
+    experts_per_token: int = 0          #   k, 1 <= k <= num_experts
+    moe_intermediate_size: int | None = None   # expert width (Mixtral: intermediate_size)
+    shared_expert_intermediate_size: int = 0   # Qwen2-MoE shared expert (0: none)
+    moe_layer_indices: tuple[int, ...] = ()    # derived at load from the family's config
     source: Literal["huggingface", "fixture", "manual"]
     # strict=True: config values must already be ints/bools. Property `attention` derives
     # mha/gqa/mqa. Validator: num_attention_heads % num_kv_heads == 0.
 
 class DerivedModelInfo(BaseModel, frozen=True):   # computed by memory.weights.model_info
-    param_count: int
+    param_count: int                    # all parameters (MoE: every expert, resident)
+    active_param_count: int             # M8: parameters computing per token (dense: all)
     attention: Attention
     weight_bytes_by_dtype: dict[DType, int]
 
@@ -350,12 +368,31 @@ class BenchmarkRow(BaseModel, frozen=True):
     ttft_ms_p95: float | None
     tpot_ms_p50: float | None
     tpot_ms_p95: float | None
-    source_url: str
+    source_url: str                     # https URL, or (M8) "user-upload" for a session upload
+                                        #   (rejected in shipped tables)
     as_of: date
 
 class BenchmarkTable(BaseModel, frozen=True):
     rows: tuple[BenchmarkRow, ...]
     aliases: dict[str, str]             # model id -> canonical id; canonical(id) method
+
+# llmplan/perf/uploads.py (M8)
+class VllmRun(BaseModel, frozen=True):  # what a vLLM benchmark JSON does not record
+    gpu_id: str
+    tensor_parallel: int = 1            # ge=1
+    dtype: DType = "bf16"
+    engine_version: str = "unknown"
+class RowRejection(BaseModel, frozen=True):
+    index: int                          # 0-based row of the upload
+    reason: str
+class BenchmarkUpload(BaseModel, frozen=True):
+    rows: tuple[BenchmarkRow, ...]      # source_url "user-upload", as_of today
+    rejected: tuple[RowRejection, ...]
+    notes: tuple[str, ...]
+# load_upload(data: bytes, model, gpus, *, run=None, today=None) -> BenchmarkUpload
+# upload_backends(rows) -> dict[str, PerfBackend]   ({"table": shipped + uploaded rows};
+#   uploaded rows answer first, shipped rows of the same match only when they cannot)
+# rows_csv(rows) -> str; perf/contribute.py: contribute_url(rows) -> (url, rows_included)
 ```
 
 ```python
@@ -483,6 +520,10 @@ class PlanResult(BaseModel, frozen=True):
     class_binding: tuple[Binding, ...] = ()   # M7: binding label per class
     # With classes, capacity_* is what the routing LP allocates to the classes, summed, and
     # `binding` says whether any class's request or token demand is tight.
+    # M8 properties (derived from `replicas`, not serialized, so plan JSON is unchanged):
+    #   perf_confidence: Literal["measured", "interpolated", "roofline", "mixed"] -- the
+    #     chosen replicas' PerfEstimate.confidence, "mixed" when they differ
+    #   perf_sources: tuple[str, ...] -- their distinct source_urls, sorted
 
 class RoutingRule(BaseModel, frozen=True):    # M7
     class_index: int
@@ -608,11 +649,22 @@ class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
     single_class_cost_usd_per_day: float | None = None   # M7: the request planned without
                                          #   classes (None: no classes, or infeasible);
                                          #   property class_saving_pct
+    single_class_ttft_violation_pct: float | None = None # M8: that fleet replayed on the
+                                         #   traffic; property comparison -> ClassComparison
+
+# llmplan/simulate/compare.py (M8)
+class ClassComparison(BaseModel, frozen=True):
+    class_cost_usd_per_day: float        # gt=0
+    single_class_cost_usd_per_day: float | None   # None: no single-class fleet meets the target
+    single_class_ttft_violation_pct: float | None # replay of the single-class fleet; None: not
+                                         #   replayed (no trace, or no such fleet)
+# compare_single_class(request, result, workload=None, *, options=None, gpus=None)
+#   -> ClassComparison | None   (None when the request has no classes)
 
 # llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
 class SamplePreset(BaseModel, frozen=True):
     key: str; label: str
-    filename: str                        # under data/traces/samples/, generic csv
+    filename: str                        # under llmplan/data/traces/samples/, generic csv
     rows: int                            # gt=0
     source_url: str
 class SyntheticPreset(BaseModel, frozen=True):
@@ -636,11 +688,14 @@ Downstream code calls only these.
 | M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path \| InMemoryTrace, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 50 MB cap; `InMemoryTrace(name, data)`, added in M6, parses an upload from memory so it is never written to disk) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
-| M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet; M7: `PlanRequest.classes` switches on request-size classes, and a class with demand but no eligible candidate is `InfeasiblePlan`) |
+| M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest, *, backends: Mapping[str, PerfBackend] \| None = None) -> PlanResult` (M8: `backends` overrides perf backends for this plan, as in `estimate`; it carries a session's uploaded benchmark rows; raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet; M7: `PlanRequest.classes` switches on request-size classes, and a class with demand but no eligible candidate is `InfeasiblePlan`) |
 | M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`; M7: `options.routing="class_weighted"` follows `plan.routing`, `options.kv_accounting` picks incremental or full KV) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
 | M7 (implemented) | `llmplan.workload.classify` | `(workload: Workload, *, input_bins: int = 2, output_bins: int = 2, method: Literal["quantile", "fixed"] = "quantile", edges: tuple[tuple[int, ...], tuple[int, ...]] \| None = None, window_s: float = 60.0) -> tuple[DemandClass, ...]` (`window_s`, added in M7, is the peak-window length and must match the `WorkloadStats` the plan uses) |
-| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
+| M8 (implemented) | `llmplan.perf.uploads.load_upload` | `(data: bytes, model: ModelSpec, gpus: Mapping[str, GPUSpec], *, run: VllmRun \| None = None, today: date \| None = None) -> BenchmarkUpload` (llmplan CSV or vLLM `--save-result` JSON; rows validated like shipped rows, rejections with index and reason; `ValidationError` for file-level problems); `upload_backends(rows) -> dict[str, PerfBackend]` is the `backends=` override for `estimate`/`plan` |
+| M8 (implemented) | `llmplan.simulate.compare.compare_single_class` | `(request: PlanRequest, result: PlanResult, workload: Workload \| None = None, *, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None, backends: Mapping[str, PerfBackend] \| None = None) -> ClassComparison \| None` (the request planned without classes, its fleet replayed on `workload`) |
+| M8 (implemented) | `llmplan.perf.contribute.contribute_url` | `(rows: Sequence[BenchmarkRow]) -> tuple[str, bool]` (prefilled GitHub issue URL and whether it carries the rows; 6,000-character cap) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec], backends: Mapping[str, PerfBackend] \| None = None) -> PlanRun` (M8: `backends` = uploaded rows, also keyed into `cache_key`; plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`; M7: a request with classes is replayed with `class_weighted` routing and also planned without classes for the saving) |
 
 ---
 
@@ -652,12 +707,12 @@ no entry points, until an external contributor needs one.
 
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
-| Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
+| Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `config_fields(model_id, raw) -> dict` (M8: the family's own `ModelSpec` fields), `count_params(ModelSpec) -> int`, `active_params(ModelSpec) -> int` (M8), `expert_params(ModelSpec) -> int` (M8, routed experts), `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key (DeepSeek V2/V3 raise `UnsupportedArchitecture` naming MLA) | `llama_like` (M1); `mixtral`, `qwen_moe` (M8) |
 | Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(source, *, max_bytes) -> Workload`; `detect(source) -> str` (`source` is a `Path` or, since M6, an `InMemoryTrace`) | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5). `class_weighted` (M7) needs the plan's routing weights and each request's class, so it is built per replay by `class_weighted(replica_types, rules, request_class) -> Route` rather than registered |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); M8: `plan(PlanRequest, PlanResult, comparison: ClassComparison | None = None)` adds the class/single-class comparison (text: a "Request-size routing" sentence; JSON: a `class_comparison` object, ignored by `load_plan_json`); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
 
 ---
 
@@ -685,18 +740,22 @@ exits 1. Messages are one line, actionable, and name the offending field or id.
 
 ## 8. Configuration and data files
 
-- `data/gpus.yaml`: list of `GPUSpec`. `data/prices.yaml`: list of `PriceRow`. Both validated
+All shipped data lives under `llmplan/data/` and is resolved by `llmplan/paths.py` with
+`importlib.resources`, so a checkout, an editable install and an installed wheel read the
+same files (M8). Paths below are relative to `llmplan/data/`.
+
+- `gpus.yaml`: list of `GPUSpec`. `prices.yaml`: list of `PriceRow`. Both validated
   on load; a bad row fails the whole load with the row index and field.
 - Users may pass `--gpus`/`--prices` to override with their own files (same schema).
   `llmplan plan` uses `--gpus` for a list of GPU ids (M4_DESIGN.md section 9), so its catalog
   overrides are `--gpu-catalog PATH` and `--prices PATH`.
-- `data/benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `data/benchmarks/aliases.yaml`:
+- `benchmarks/<gpu-id>.yaml`: lists of `BenchmarkRow`; `benchmarks/aliases.yaml`:
   mapping of model id -> canonical id. Every row must resolve to a model fixture (directly or
   through an alias) and pass the physical floor (roofline at 100% bandwidth and MFU), or the
   whole load fails with `BenchmarkError` naming the file, row index, and model id.
-- Fixtures in `data/fixtures/model_configs/` are hand-written JSON containing only the
+- Fixtures in `fixtures/model_configs/` are hand-written JSON containing only the
   architectural integers needed by `ModelSpec`, not copies of upstream config files.
-- `data/traces/manifest.yaml` (M2): list of `TraceSource` rows
+- `traces/manifest.yaml` (M2): list of `TraceSource` rows
   (`llmplan.workload.fetch`: `name`, `url | None`, `sha256 | None`, `size_bytes | None`,
   `as_of`, `license_url`). `llmplan traces fetch` downloads only with `--yes`, caps at
   2 GiB, verifies the SHA-256, and never writes into the repo unless `--dest` points there.

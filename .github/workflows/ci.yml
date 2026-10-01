@@ -15,10 +15,13 @@ env:
   TERM: "dumb"
 
 jobs:
+  # Lint, types, unit and acceptance tests without the Streamlit AppTest suite, audit, build.
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # M8 test 9.10 scans the full git history for secrets
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
@@ -30,11 +33,32 @@ jobs:
         run: uv run ruff format --check
       - name: Types
         run: uv run mypy --strict llmplan
-      - name: Tests
+      - name: Tests (default selection; excludes ui, slow, docker, network)
         run: uv run pytest
       - name: Audit dependencies
         run: uv audit
       - name: Build
         run: uv build
+      - name: Install smoke test (clean venv, pip, outside the checkout)
+        run: uv run --no-project python scripts/wheel_smoke.py dist/*.whl --installer pip
       - name: CLI entry point
         run: uv run llmplan --help
+
+  # The Streamlit AppTest suite (marker `ui`), then the multi-second tests (marker `slow`).
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Sync (locked)
+        run: uv sync --locked --all-extras
+      - name: AppTest suite
+        run: uv run pytest -m 'ui and not slow' --cov-fail-under=0
+      - name: Coverage of the web UI modules
+        # --omit replaces pyproject's report omit list (the page modules), so all of
+        # llmplan/ui/* is measured here.
+        run: uv run coverage report --include='llmplan/ui/*' --omit='llmplan/ui/__init__.py' --fail-under=90
+      - name: Slow tests
+        run: uv run pytest -m 'slow and not docker and not network' --no-cov

@@ -82,7 +82,7 @@ def synth_command(
 
 @traces_app.command("fetch")
 def fetch_command(
-    name: Annotated[str, typer.Argument(help="Trace name from data/traces/manifest.yaml.")],
+    name: Annotated[str, typer.Argument(help="Trace name from the shipped trace manifest.")],
     dest: Annotated[Path, typer.Option("--dest", help="Existing directory to save into.")],
     yes: Annotated[
         bool, typer.Option("--yes", help="Consent to download the file (required).")

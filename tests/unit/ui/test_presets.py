@@ -63,7 +63,7 @@ def test_only_the_ui_imports_streamlit() -> None:
     command imports it inside the command function only."""
     for path in PACKAGE.rglob("*.py"):
         relative = path.relative_to(PACKAGE).as_posix()
-        if relative in ("ui/app.py", "ui/views.py"):
+        if relative in ("ui/app.py", "ui/views.py", "ui/calibrate.py"):  # M8: calibrate
             continue
         for module, top_level in _imports(path):
             if module.split(".")[0] == "streamlit":

@@ -23,10 +23,13 @@ from pydantic import BaseModel, ConfigDict
 
 from llmplan.catalog.hardware import GPUSpec, PriceRow
 from llmplan.catalog.models import ModelSpec
-from llmplan.errors import InfeasiblePlan, ValidationError
+from llmplan.errors import ValidationError
 from llmplan.memory.engine import EngineProfile
+from llmplan.perf import PerfBackend
+from llmplan.perf.benchmarks import BenchmarkRow
 from llmplan.planner import SLO, PlanOptions, PlanRequest, PlanResult, plan
 from llmplan.simulate import SimOptions, Timeline, replay
+from llmplan.simulate.compare import ClassComparison, compare_single_class
 from llmplan.types import DType
 from llmplan.ui.presets import MAX_PLANS_PER_HOUR, MAX_SIM_REQUESTS, MAX_TIME_LIMIT_S
 from llmplan.workload import DemandClass, Workload, WorkloadStats
@@ -44,7 +47,8 @@ class PlanRun(BaseModel):
     """The outcome of one Plan click: the request, the plan, and its replay. With
     request-size classes (M7), `single_class_cost_usd_per_day` is the cost of the same
     request planned without them (None when that plan is infeasible or there are no
-    classes), the base of the UI's "saving from request-size routing"."""
+    classes) and (M8) `single_class_ttft_violation_pct` the share of requests over the TTFT
+    budget when that single-class fleet is replayed on the same traffic."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -52,6 +56,18 @@ class PlanRun(BaseModel):
     result: PlanResult
     timeline: Timeline
     single_class_cost_usd_per_day: float | None = None
+    single_class_ttft_violation_pct: float | None = None
+
+    @property
+    def comparison(self) -> ClassComparison | None:
+        """M8: the class plan against the single-class plan (None without classes)."""
+        if not self.result.classes:
+            return None
+        return ClassComparison(
+            class_cost_usd_per_day=self.result.cost_usd_per_day,
+            single_class_cost_usd_per_day=self.single_class_cost_usd_per_day,
+            single_class_ttft_violation_pct=self.single_class_ttft_violation_pct,
+        )
 
     @property
     def class_saving_pct(self) -> float | None:
@@ -198,11 +214,19 @@ def workload_digest(workload: Workload) -> str:
     return digest.hexdigest()
 
 
-def cache_key(request: PlanRequest, options: SimOptions, workload: Workload) -> str:
+def cache_key(
+    request: PlanRequest,
+    options: SimOptions,
+    workload: Workload,
+    benchmarks: Sequence[BenchmarkRow] = (),
+) -> str:
     """SHA-256 of the request and replay options JSON plus the workload rows' digest (the
-    timeline depends on the rows, not only on the statistics in the request)."""
+    timeline depends on the rows, not only on the statistics in the request) and (M8) the
+    uploaded benchmark rows, which change the estimates."""
+    rows = "\n".join(row.model_dump_json() for row in benchmarks)
     digest = hashlib.sha256()
-    for part in (request.model_dump_json(), options.model_dump_json(), workload_digest(workload)):
+    parts = (request.model_dump_json(), options.model_dump_json(), workload_digest(workload), rows)
+    for part in parts:
         digest.update(part.encode())
         digest.update(b"\0")
     return digest.hexdigest()
@@ -213,31 +237,40 @@ def run_plan(
     workload: Workload,
     options: SimOptions,
     gpus: Mapping[str, GPUSpec],
+    backends: Mapping[str, PerfBackend] | None = None,
 ) -> PlanRun:
     """Plan, then replay the workload on the planned fleet with the request's SLO budgets.
 
     A plan with request-size classes is replayed with `class_weighted` routing and is
-    compared with the same request planned without classes. When queues make the replay
+    compared with the same request planned without classes, whose fleet is replayed too
+    (`compare_single_class`). When queues make the replay
     run far past the last arrival (more than 200 windows), it is replayed once more with a
-    window chosen over the full span. Runs one at a time per process. Raises whatever
-    `plan` and `replay` raise.
+    window chosen over the full span. `backends` (M8) carries a session's uploaded benchmark
+    rows to the planner. Runs one at a time per process. Raises whatever `plan` and
+    `replay` raise.
     """
-    single: float | None = None
     with _RUN_LOCK:
-        result = plan(request)
+        result = plan(request, backends=backends)
+        comparison = compare_single_class(
+            request, result, workload, options=options, gpus=gpus, backends=backends
+        )
         if request.classes:
             options = options.model_copy(update={"routing": "class_weighted"})
-            try:
-                single = plan(request.model_copy(update={"classes": ()})).cost_usd_per_day
-            except InfeasiblePlan:
-                single = None
         timeline = replay(result, workload, slo=request.slo, options=options, gpus=gpus)
         if len(timeline.windows) > MAX_WINDOWS:
             span = len(timeline.windows) * options.window_s
             wider = options.model_copy(update={"window_s": timeline_window_s(span)})
             timeline = replay(result, workload, slo=request.slo, options=wider, gpus=gpus)
     return PlanRun(
-        request=request, result=result, timeline=timeline, single_class_cost_usd_per_day=single
+        request=request,
+        result=result,
+        timeline=timeline,
+        single_class_cost_usd_per_day=None
+        if comparison is None
+        else comparison.single_class_cost_usd_per_day,
+        single_class_ttft_violation_pct=None
+        if comparison is None
+        else comparison.single_class_ttft_violation_pct,
     )
 
 

@@ -1,21 +1,24 @@
 """Plain-text rendering of a `PlanResult` (M4_DESIGN.md section 9).
 
-Sections: summary (cost against the baseline, binding constraint, solver), fleet table,
-replica table with vLLM command lines, with request-size classes (M7) a class table and the
-routing table, the top candidates by $/hour per request/s with status and reason, and the
-assumptions.
+Sections: summary (cost against the baseline, confidence in the performance estimates
+(M8), binding constraint, solver), fleet table, replica table with vLLM command lines, with
+request-size classes (M7) the comparison with the single-class plan (M8), a class table and
+the routing table, the top candidates by $/hour per request/s with status and reason, and
+the assumptions.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from llmplan.perf.confidence import confidence_sentence
 from llmplan.planner.result import label
 from llmplan.render.vllm_cmd import serve_command
 
 if TYPE_CHECKING:
     from llmplan.planner.request import PlanRequest
     from llmplan.planner.result import CandidateEval, PlanResult
+    from llmplan.simulate.compare import ClassComparison
 
 LABEL_WIDTH = 10
 TOP_CANDIDATES = 10
@@ -29,14 +32,60 @@ def _usd(value: float) -> str:
     return f"${value:,.2f}"
 
 
+def baseline_saving(saving_pct: float) -> str:
+    """The saving against the baseline as a non-negative percentage, e.g. `"saving 12.5%"`;
+    a fleet dearer than its baseline (possible only at a solver time limit) reads
+    `"baseline 3.0% cheaper"`, so no negative percentage is ever printed (M8 section 4)."""
+    if saving_pct < 0:
+        return f"baseline {-saving_pct:.1f}% cheaper"
+    return f"saving {saving_pct:.1f}%"
+
+
+def _pct(value: float) -> str:
+    return f"{value:.1f}%" if value >= 0.05 else "under 0.1%"
+
+
+def class_comparison_sentence(comparison: ClassComparison) -> str:
+    """The class plan against the single-class plan in words (M8_DESIGN.md section 4): what
+    sizing for the mean request would cost and why it is not enough, the saving, or that
+    nothing changes. Amounts are compared to the cent; percentages are never negative."""
+    cost = comparison.class_cost_usd_per_day
+    single = comparison.single_class_cost_usd_per_day
+    if single is None:
+        return (
+            "No fleet sized for the mean request meets the target; the class-sized plan "
+            f"costs {_usd(cost)}/day."
+        )
+    if round(cost, 2) > round(single, 2):
+        violations = comparison.single_class_ttft_violation_pct
+        if violations:
+            miss = (
+                "the replay shows it would miss the latency target for "
+                f"{_pct(violations)} of requests"
+            )
+        else:
+            miss = "it would under-provision the long-request class"
+        return (
+            f"Sized for the mean request this fleet would cost {_usd(single)}/day, but {miss}. "
+            f"The class-sized plan costs {_usd(cost)}/day."
+        )
+    if round(cost, 2) < round(single, 2):
+        saved = single - cost
+        return (
+            f"Request-size routing saves {_usd(saved)}/day ({_pct(saved / single * 100)}) "
+            "versus sizing every replica for the mean request."
+        )
+    return "Request-size routing does not change the fleet for this traffic."
+
+
 def _summary(request: PlanRequest, result: PlanResult) -> list[str]:
     solver = result.solver
-    if result.baseline is None:
+    if result.baseline is None or result.baseline_saving_pct is None:
         versus = "homogeneous requested" if request.options.homogeneous else "no homogeneous fleet"
     else:
         versus = (
-            f"baseline {_usd(result.baseline.cost_usd_per_day)}/day, saving "
-            f"{result.baseline_saving_pct:.1f}%"
+            f"baseline {_usd(result.baseline.cost_usd_per_day)}/day, "
+            f"{baseline_saving(result.baseline_saving_pct)}"
         )
     bound = solver.best_bound_usd_per_day
     return [
@@ -52,6 +101,7 @@ def _summary(request: PlanRequest, result: PlanResult) -> list[str]:
             f"tokens/s (derated x {request.slo.utilization_target:g})",
         ),
         _line("Cost", f"{_usd(result.cost_usd_per_day)}/day  ({versus})"),
+        f"Confidence  {confidence_sentence(result.perf_confidence, result.perf_sources)}",
         _line("Binding", result.binding),
         _line(
             "Solver",
@@ -96,10 +146,13 @@ def _tokens(lo: int, hi: int) -> str:
     return f"{lo:,}..{hi:,}"
 
 
-def _classes(result: PlanResult) -> list[str]:
+def _classes(result: PlanResult, comparison: ClassComparison | None) -> list[str]:
     if not result.classes:
         return []
-    lines = [
+    lines = []
+    if comparison is not None:
+        lines += ["", "Request-size routing", f"  {class_comparison_sentence(comparison)}"]
+    lines += [
         "",
         "Classes",
         f"  {'class':>5}  {'input tokens':<16}{'output tokens':<16}{'share':>7}"
@@ -133,14 +186,17 @@ def _candidate(c: CandidateEval) -> str:
     return f"  {c.status:<11}{cost:>10}  {name:<44}{c.reason}"
 
 
-def plan_text(request: PlanRequest, result: PlanResult) -> str:
-    """Render `llmplan plan` output as aligned plain text."""
+def plan_text(
+    request: PlanRequest, result: PlanResult, comparison: ClassComparison | None = None
+) -> str:
+    """Render `llmplan plan` output as aligned plain text. `comparison` (M8) is the class
+    plan against the single-class plan, shown before the class table when given."""
     shown = result.candidates[:TOP_CANDIDATES]
     lines = [
         *_summary(request, result),
         *_fleet(result),
         *_replicas(request, result),
-        *_classes(result),
+        *_classes(result, comparison),
         "",
         f"Candidates (top {len(shown)} of {len(result.candidates)} by $/hour per req/s)",
         f"  {'status':<11}{'$/h/rps':>10}  {'candidate':<44}reason",

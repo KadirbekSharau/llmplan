@@ -37,6 +37,7 @@ def test_text_has_summary_windows_and_assumptions() -> None:
     assert len(rows) == 3  # 10 s of arrivals plus the last completion, in 5 s windows
 
 
+@pytest.mark.slow  # M8 9b: multi-second; runs in the `ui` CI job's slow step
 def test_vram_split_with_and_without_the_gpu_spec() -> None:
     trace = workload([0.25 * i for i in range(40)], 100, 40)
     known = replay(sim_plan(replicas=2), trace, gpus=GPUS)

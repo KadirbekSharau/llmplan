@@ -37,7 +37,7 @@ named. Nothing here is optional.
 - Unit tests for every new module. Property tests where the design doc lists them.
 - Line coverage of the milestone's new modules is at least 90% (`pytest --cov=llmplan
   --cov-report=term-missing`); add `pytest-cov` as a dev dependency if absent.
-- No network, no GPU, no external services in tests. Fixtures live under `data/fixtures/`
+- No network, no GPU, no external services in tests. Fixtures live under `llmplan/data/fixtures/`
   or `tests/fixtures/` and are hand-written or tiny samples.
 - The full suite runs in under 60 seconds on a laptop CPU.
 
