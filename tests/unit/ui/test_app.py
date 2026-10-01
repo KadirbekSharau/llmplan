@@ -52,10 +52,11 @@ def test_a_valid_upload_shows_its_stats_and_plans() -> None:
     assert at.file_uploader(key="upload").allowed_type == [".csv"]
     plan(at)
     assert "upload a CSV trace" in at.error[0].value
-    content = (FIXTURES / "workload_azure2024_50.csv").read_bytes()
+    content = (FIXTURES / "workload_burstgpt_50.csv").read_bytes()
     at.file_uploader(key="upload").set_value(("trace.csv", content, "text/csv"))
     at.run()
-    assert any("azure2024 format, 50 requests" in c.value for c in at.caption)
+    assert any("burstgpt format, 50 requests" in c.value for c in at.caption)
+    assert any(r"zero\_output\_rows=2" in c.value for c in at.caption)  # notes, escaped
     plan(at.run())  # the second run reuses the parsed upload
     assert not at.error
     assert cost_per_day(at) > 0
