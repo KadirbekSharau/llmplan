@@ -125,6 +125,14 @@ M0 to M7 merged. Decisions taken at the M7 review:
 - **Per-request-size demand classes.** Scheduled as M7 (docs/milestones/M7_DESIGN.md),
   which also replaces M4's Mélange acceptance target with a brute-force exactness test and a
   same-inputs cross-check against Mélange's solver.
+- **UI wording (small).** The results page headlines "Saving from request-size routing:
+  -87.5%". Reword to "Sized for the mean request this would cost $X/day but would miss the
+  latency target; the class-sized plan costs $Y/day" so a negative saving never appears.
+  Found in the CTO's browser check of M6/M7 on 2026-10-01.
+- **Verification note.** The Claude desktop app's built-in browser pane never completes
+  Streamlit's WebSocket upgrade, and Python WebSocket clients launched from the CTO session
+  also time out, while the app renders and plans correctly in a real Chrome. Verify the UI in
+  a real browser; AppTest covers logic but not the server.
 - **Suite runtime.** The full suite with coverage is at ~56 s against a 60 s budget; split
   slow acceptance runs or raise the budget before adding more.
 - **Hourly autoscaling.** `hourly_rps` exists since M2; M4 sizes for the peak window only.
