@@ -55,6 +55,11 @@ log, mount a directory writable by uid 10001. On a container host (Fly.io, Rende
 Run, a VM), point the service at port 8501 and the health path `/_stcore/health`; nothing
 else is required.
 
+If `docker build` stalls at "load metadata for docker.io/library/python:3.11-slim" (seen
+with Docker 20.10 when the client's credential helper does not respond), run `docker pull
+python:3.11-slim` first and build with the classic builder: `DOCKER_BUILDKIT=0 docker
+build -t llmplan .`.
+
 ## Streamlit Community Cloud (free, needs a public GitHub repository)
 
 1. Make the repository public (a decision for the founder; question 5).
