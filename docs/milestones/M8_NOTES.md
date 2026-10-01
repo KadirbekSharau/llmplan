@@ -14,7 +14,32 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   `slow`: `test_vram_split_with_and_without_the_gpu_spec` (3.5 s),
   `test_8_5_determinism` (2.6 s) and `test_simulate_json_flags_override_and_png` (2.5 s).
   Locally: `uv run pytest` is the `check` selection, `uv run pytest -m ui` the AppTest
-  suite, `uv run pytest -m slow --no-cov` the slow tests.
+  suite, `uv run pytest -m slow --no-cov` the slow tests. M1 to M7 acceptance files touched by
+  this, selection only (no assertion or expected value changed): `test_m6.py` gained the
+  module-level `ui` marker and `test_m7.py::test_8_5_determinism` the `slow` marker.
+- **9b — Timings.** This laptop (8 cores, Apple Silicon, Python 3.11) was shared with other
+  agents' jobs for the whole milestone, with 1-minute load averages from 14 to 256, so wall
+  times swing by 2-3x between runs; user CPU time is the steadier measure. Before: the
+  pre-M8 default (`not slow and not docker`) at `f28ed47`. After: the M8 default selection,
+  plus the pre-M8 selection and the `ui` job's selection run back to back with it for a
+  like-for-like comparison (all with coverage on).
+
+  | When | Selection | Tests | Load avg | pytest wall | Process real | User CPU |
+  |---|---|---|---|---|---|---|
+  | 11:59, before M8 | pre-M8 default (incl. AppTest) | 593 | 15-21 | 109.9 s | 189.1 s | 89.8 s |
+  | 13:36, M8 tree | pre-M8 selection | 635 | 113 | 138.3 s | 146.7 s | 113.7 s |
+  | 13:38, M8 tree | **M8 default** (`check`) | 618 | 213 | 67.2 s | 76.7 s | 59.6 s |
+  | 13:40, M8 tree | `ui and not slow` (`ui` job) | 18 | 237 | 172.5 s | 182.0 s | 75.0 s |
+  | 13:43, M8 tree | pre-M8 selection | 635 | 177 | 153.3 s | 163.9 s | 117.8 s |
+  | 13:45, M8 tree | **M8 default** (`check`) | 618 | 205 | 71.4 s | 82.4 s | 60.8 s |
+  | 13:47, M8 tree | `ui and not slow` (`ui` job) | 18 | 196 | 90.5 s | 100.7 s | 73.3 s |
+
+  The default selection needs about half the CPU of the pre-split one (60 s against 116 s
+  of user time under the same conditions); the 18 AppTest tests account for most of the
+  rest and now run in parallel in the `ui` job. The default run came in under the 45 s
+  target when the machine was less contended (44.96 s for 583 tests at 12:17, after step
+  1), but not during the final measurements above; on an uncontended laptop it should be
+  well inside it, which the CTO can confirm independently.
 - **9b — Two coverage gates.** The Streamlit page modules (`ui/app.py`, `ui/views.py`,
   `ui/calibrate.py`) run only under AppTest, so `[tool.coverage.report] omit` leaves them
   out of the default run's 90% gate, and the `ui` job gates all of `llmplan/ui/*` at 90%
@@ -274,7 +299,8 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   and license badges and a License section.
 - **Step 7 — SECURITY.md and CONTRIBUTING.md.** Reports go by email to the founder at the
   address already public in this repository's commit history (`sharaukadr2001@gmail.com`,
-  the git identity of every commit), or through GitHub's private vulnerability reporting;
+  the author address of nearly every commit), or through GitHub's private vulnerability
+  reporting;
   no bounty; supported versions and what the tool does with the network and uploads.
   CONTRIBUTING.md is the definition of done in short and the benchmark-row workflow
   (`vllm bench serve --save-result`, check with `--benchmarks`, the contribute link).
@@ -295,6 +321,31 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   `fetch-depth: 0` so it sees the full history. Hits would be printed masked (first six
   characters). `tests/unit/test_check_secrets.py` proves each marker is detected, with fake
   values assembled at run time so nothing secret-shaped is committed.
+- **Step 8 — Documentation.** README: badges, an Install section (`pip install llmplan`
+  once published), a paragraph on confidence and calibration, the new options of `plan`
+  and `perf estimate`, the MoE families and fixtures, the class-comparison sentence, the
+  test markers and the two scripts. Its list of internal documents moved to a short
+  "Project documents" section and no longer links FOUNDER_QUESTIONS.md, CTO_ASSESSMENT.md
+  or LAUNCH.md (they stay in the repository; the README becomes the public and PyPI page).
+  CHANGELOG: the M0 to M7 entries, released as the existing `v0.1.0` tag, are now
+  `## [0.1.0] - 2026-10-01`, and M8 is `## [0.2.0] - Unreleased` (the release workflow
+  cuts the notes from the `## [0.2.0]` heading, tested on this file). ARCHITECTURE.md: the
+  M8 rows of the public API table, models, registries and layout (updated in the commit
+  of each change). MILESTONES.md: M8 "ready for review"; the CTO records the merge hash.
+- **Package growth (~1,255 net lines under `llmplan/`, excluding the data move).**
+  ARCHITECTURE.md section 1 asks for a justification above ~300 lines: M8 is seven
+  deliverables. Benchmark uploads (`perf/uploads.py` 245) and the contribute link
+  (`perf/contribute.py` 57), confidence sentences (`perf/confidence.py` 70), the class
+  comparison (`simulate/compare.py` 77), the MoE family (`catalog/architectures/moe.py`
+  147, plus the shared per-part formulas in `llama_like.py`), package paths (`paths.py`
+  32), the UI calibration panel (`ui/calibrate.py` 96), and the threading of `backends=`,
+  the CLI options, the wording and the MoE roofline through existing modules. Module
+  sizes: `ui/app.py` 398 (the M6 design caps it at 400), `ui/state.py` 305 (the `comparison`
+  property and `backends`), every other module under 300.
+- **Coverage of the new modules.** `perf/uploads.py`, `perf/contribute.py`,
+  `perf/confidence.py`, `simulate/compare.py`, `catalog/architectures/moe.py` and
+  `paths.py` at 100% in the default run (99.8% overall); `ui/calibrate.py` runs under AppTest:
+  96% in the `ui` job, whose `llmplan/ui/*` gate is at 95%.
 
 ## Deviations from the design doc
 
@@ -304,7 +355,6 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   byte-for-byte pre-M7 golden comparison of M7 acceptance test 8.1, which must pass
   unchanged. `ModelSpec.attention` and `PlanRun.class_saving_pct` set the precedent.
   ARCHITECTURE.md section 4 documents them.
-
 - **Step 3 — `BenchmarkRow.source_url` accepts the literal `"user-upload"`.** The design
   fills uploaded rows' `source_url` with `user-upload`, which the `^https://\S+$` pattern
   rejected. The pattern is now `^(https://\S+|user-upload)$`, and `load_benchmarks` rejects
@@ -314,13 +364,11 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   "the existing `backends=` override mechanism (M3)", which existed only on
   `perf.estimate`; the planner calls `estimate` internally, so it needs the same keyword.
   `compare_single_class` passes it on too. ARCHITECTURE.md section 5 updated.
-
 - **Step 4 — `Architecture` gains `config_fields`, `active_params` and `expert_params`.**
   The design lists the new `ModelSpec` and `DerivedModelInfo` fields but not where the
   family-specific config keys are read or how decode bytes split experts from the rest;
   keeping both in the registry member keeps "a new family is one module plus one import".
   ARCHITECTURE.md sections 3, 4 and 6 updated.
-
 - **Step 7 — The secrets scan matches secret-shaped values, not bare substrings.** The
   design says "`git log -p | grep` for `token`, `hf_`, `ghp_`, `AKIA`, `sk-`" and that any
   hit stops the milestone; taken literally every run would stop on `input_tokens`. The
@@ -329,4 +377,14 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
 
 ## Questions for founder
 
-None beyond docs/FOUNDER_QUESTIONS.md item 7 (PyPI account and trusted publishing).
+None beyond docs/FOUNDER_QUESTIONS.md item 7 (PyPI account and trusted publishing), whose
+one-time steps are now in docs/DEPLOY.md ("Publishing to PyPI"). Per the founder's rule,
+these CTO-decidable items were decided here and are open to review:
+
+- **Security contact.** SECURITY.md gives `sharaukadr2001@gmail.com` (the author address
+  of nearly every commit, so already public once the history is) and GitHub's private
+  vulnerability reporting. Replace the address if another inbox should receive reports.
+- **README as the public page.** Internal documents are no longer linked from the README
+  (see step 8); revert if they should stay visible.
+- **vLLM version default.** A vLLM JSON upload without a version records
+  `engine_version: unknown` (the field is required); the contribute checklist asks for it.
