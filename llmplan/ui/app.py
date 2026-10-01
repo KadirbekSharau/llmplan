@@ -1,9 +1,9 @@
-"""llmplan web UI (M6): pick a model, traffic, a latency target and prices; get the cheapest
-fleet, its vLLM command lines and the utilization timeline.
+"""llmplan web UI (M6; M9: four input steps, the answer first, five result tabs).
 
 Run with `llmplan ui`. The page holds no planning logic: results come from `llmplan.*`
-through `llmplan.ui.state` (M8: own benchmarks through `llmplan.ui.calibrate`), recomputed
-only on Plan, and logged by `usage_log` when enabled. Limits (M6_DESIGN.md section 6): 50 MB
+through `llmplan.ui.state` (M8: own benchmarks through `llmplan.ui.calibrate`), computed
+only on Plan, and logged by `usage_log` when enabled. Every input lives in session state
+under its widget key, seeded from `presets.DEFAULTS`. Limits (M6_DESIGN.md section 6): 50 MB
 uploads checked before parsing, 30 s solver limit, 200,000 requests, 30 plans per hour.
 """
 
@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import NoReturn
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -26,8 +26,8 @@ from llmplan.errors import InfeasiblePlan, LLMPlanError, ValidationError
 from llmplan.perf.uploads import upload_backends
 from llmplan.planner import SLO, PlanRequest, PlanResult
 from llmplan.simulate import SimOptions
-from llmplan.types import Commitment, DType
-from llmplan.ui import calibrate, presets, state, usage_log, views
+from llmplan.types import Commitment
+from llmplan.ui import calibrate, presets, state, usage_log, views, wording
 from llmplan.workload import (
     InMemoryTrace,
     Workload,
@@ -40,38 +40,25 @@ from llmplan.workload.classes import classify_spec
 from llmplan.workload.synth import parse_distribution
 
 log = logging.getLogger("llmplan.ui")
-
-CUSTOM_MODEL = "Other Hugging Face id"
-TRAFFIC_MODES = ("Preset sample", "Upload CSV", "Synthetic")
+ss = st.session_state
+Traffic = Callable[[], Workload]
 COMMITMENTS: tuple[Commitment, ...] = ("on_demand", "reserved_1y", "reserved_3y", "spot")
 DISTRIBUTION_HELP = "fixed:N, lognormal:MEAN:SIGMA[:LO:HI] (underlying normal), or uniform:LO:HI"
 CLASSES_HELP = "Input x output token bins (median splits for 2x2); 1 sizes for the mean request"
+COMPACT_HELP = (
+    "Inputs above the results instead of in the sidebar, for phones. Streamlit cannot detect "
+    "the screen width, so this is a switch; the page URL remembers it."
+)
+TARGET_HELP = {
+    "ttft": "Time to first token (95th percentile): how long until the first word appears.",
+    "tpot": "Time per output token (95th percentile): the gap between words as the answer streams.",
+    "utilization": "Capacity is derated to this share of each replica, keeping headroom.",
+}
 
 
-@dataclass(frozen=True)
-class Inputs:
-    """Everything the sidebar collected; `workload` builds or returns the traffic."""
-
-    model_id: str
-    workload: Callable[[], Workload]
-    slo: SLO
-    price_table: pd.DataFrame
-    gpu_ids: Sequence[str]
-    providers: Sequence[str]
-    tensor_parallel: Sequence[int]
-    dtypes: Sequence[DType]
-    max_num_seqs: Sequence[int]
-    max_model_len: int
-    perf_backend: str
-    solver: str
-    time_limit_s: float
-    classes: str
-    benchmarks: calibrate.BenchmarkFile | None
-
-
-@st.cache_resource(show_spinner=False)
-def _catalogs() -> tuple[Mapping[str, GPUSpec], tuple[PriceRow, ...]]:
-    gpus = load_gpus()
+@st.cache_data(ttl=86_400, show_spinner=False)
+def _catalogs() -> tuple[dict[str, GPUSpec], tuple[PriceRow, ...]]:
+    gpus = dict(load_gpus())  # a plain dict: cached values are pickled
     return gpus, load_prices(gpus=gpus)
 
 
@@ -80,7 +67,7 @@ def _model(model_id: str) -> ModelSpec:
     return load_model(model_id)  # HF ids are validated by the M1 fetcher before any request
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_data(ttl=86_400, show_spinner=False)
 def _preset(key: str) -> tuple[Workload, WorkloadStats]:
     workload = presets.load_preset(presets.preset(key))
     return workload, compute_stats(workload)
@@ -98,80 +85,113 @@ def _run(
     return state.run_plan(_request, _workload, _options, _gpus, upload_backends(_rows))
 
 
-def _fail(message: str) -> Callable[[], Workload]:
-    def raise_it() -> NoReturn:
-        raise ValidationError(message)
+def _seed(shipped: tuple[PriceRow, ...]) -> None:
+    """Default inputs, set before any widget is drawn; every run, because Streamlit drops the
+    state of a widget that the previous run did not draw."""
+    ss.setdefault("compact", st.query_params.get("layout") == "compact")
+    defaults = {
+        **presets.DEFAULTS,
+        "gpu_ids": sorted({row.gpu_id for row in shipped}),
+        "providers": sorted({row.provider for row in shipped}),
+    }
+    for key, value in defaults.items():
+        ss.setdefault(key, list(value) if isinstance(value, list) else value)
+
+
+def _apply(values: Mapping[str, Any]) -> None:
+    ss.update(values)
+
+
+def _remember_layout() -> None:
+    if ss["compact"]:
+        st.query_params["layout"] = "compact"
+    else:
+        st.query_params.pop("layout", None)
+
+
+def _number(label: str, key: str, **kwargs: Any) -> None:
+    low, high = presets.BOUNDS[key]
+    st.number_input(label, min_value=low, max_value=high, key=key, **kwargs)
+
+
+def _fail(error: LLMPlanError) -> Traffic:
+    def raise_it() -> Workload:
+        raise error
 
     return raise_it
+
+
+def _model_id() -> str:
+    custom = ss["model_choice"] == presets.CUSTOM_MODEL
+    return str(ss["model_custom"]).strip() if custom else str(ss["model_choice"])
 
 
 def _known_model(model_id: str) -> ModelSpec | None:
     """Fixtures resolve offline right away; Hugging Face ids once a plan has fetched them."""
     if model_id.startswith(FIXTURE_PREFIX):
         return _model(model_id)  # the picker offers shipped fixtures only
-    resolved: dict[str, ModelSpec] = st.session_state.get("resolved_models", {})
+    resolved: dict[str, ModelSpec] = ss.get("resolved_models", {})
     return resolved.get(model_id)
 
 
-def _model_section() -> str:
-    st.header("Model")
-    choices = [*presets.FIXTURE_MODELS, *presets.POPULAR_MODELS, CUSTOM_MODEL]
-    choice = st.selectbox(
-        "Model", choices, index=choices.index(presets.DEFAULT_MODEL), key="model_choice"
-    )
-    model_id = choice
-    if choice == CUSTOM_MODEL:
-        model_id = st.text_input("Hugging Face id (org/name)", key="model_custom").strip()
+def _model_step() -> None:
+    choices = [*presets.MODEL_CHOICES, presets.CUSTOM_MODEL]
+    label = {m: f"{presets.model_group(m)} · {m}" for m in presets.MODEL_CHOICES}
+    st.selectbox("Model", choices, key="model_choice", format_func=lambda m: label.get(m, m))
+    if ss["model_choice"] == presets.CUSTOM_MODEL:
+        st.text_input("Hugging Face id (org/name)", key="model_custom")
     st.caption(
         "Hugging Face configs are fetched when you click Plan. Gated models need HF_TOKEN "
         "set on the server; it is never shown or logged."
     )
-    spec = _known_model(model_id)
+    spec = _known_model(_model_id())
     if spec is not None:
-        with st.expander("Model info"):
+        st.caption(views.escape(wording.model_summary(spec)))
+        with st.popover("Model info"):
             st.code(render.get("text").model_info(spec), language=None)
-    return model_id
 
 
-def _upload_source() -> Callable[[], Workload]:
+def _upload_source() -> Traffic:
     uploaded = st.file_uploader("Trace CSV (up to 50 MB)", type=["csv"], key="upload")
     st.caption("Formats: generic csv, Azure 2023/2024, BurstGPT. Parsed in memory, never stored.")
     if uploaded is None:
-        st.session_state.pop("upload_parsed", None)
-        return _fail("upload a CSV trace, or choose a preset or synthetic traffic")
+        ss.pop("upload_parsed", None)
+        return _fail(ValidationError("upload a CSV trace, or choose a preset or synthetic traffic"))
     if uploaded.size > presets.MAX_UPLOAD_BYTES:
-        message = (
+        refused = ValidationError(
             f"Upload refused: {uploaded.size:,} bytes is over the 50 MB "
             f"({presets.MAX_UPLOAD_BYTES:,} bytes) limit; nothing was parsed."
         )
-        st.error(message)
-        return _fail(message)
-    cached = st.session_state.get("upload_parsed")
+        st.error(str(refused))
+        return _fail(refused)
+    cached = ss.get("upload_parsed")
     if cached is None or cached[0] != uploaded.file_id:
         try:
-            parsed: Workload | str = load_workload(
+            parsed: Workload | LLMPlanError = load_workload(
                 InMemoryTrace("uploaded.csv", uploaded.getvalue()),
                 max_bytes=presets.MAX_UPLOAD_BYTES,
             )
         except LLMPlanError as exc:
-            parsed = str(exc)
-        cached = (uploaded.file_id, parsed)
-        st.session_state["upload_parsed"] = cached
+            parsed = exc
+        cached = ss["upload_parsed"] = (uploaded.file_id, parsed)
     parsed = cached[1]
-    if isinstance(parsed, str):
-        st.error(parsed)
+    if isinstance(parsed, LLMPlanError):
+        st.error(str(parsed))
         return _fail(parsed)
     views.stats_caption(parsed, compute_stats(parsed))
     workload = parsed
     return lambda: workload
 
 
-def _synthetic_source() -> Callable[[], Workload]:
-    rate = st.number_input("Rate (req/s)", 0.01, 1000.0, 2.0, key="syn_rate")
-    duration = st.number_input("Duration (s)", 1.0, 86_400.0, 3600.0, 60.0, key="syn_duration")
-    in_spec = st.text_input("Input tokens", presets.DEFAULT_IN_TOKENS, help=DISTRIBUTION_HELP)
-    out_spec = st.text_input("Output tokens", presets.DEFAULT_OUT_TOKENS, help=DISTRIBUTION_HELP)
-    seed = st.number_input("Seed", 0, 2**31 - 1, 0, 1, key="syn_seed")
+def _synthetic_source() -> Traffic:
+    _number("Rate (req/s)", "syn_rate")
+    _number("Duration (s)", "syn_duration", step=60.0)
+    st.text_input("Input tokens", key="syn_in", help=DISTRIBUTION_HELP)
+    st.text_input("Output tokens", key="syn_out", help=DISTRIBUTION_HELP)
+    _number("Seed", "syn_seed")
+    rate, duration, in_spec, out_spec, seed = (
+        ss[k] for k in ("syn_rate", "syn_duration", "syn_in", "syn_out", "syn_seed")
+    )
 
     def build() -> Workload:
         expected = rate * duration
@@ -191,12 +211,12 @@ def _synthetic_source() -> Callable[[], Workload]:
     return build
 
 
-def _traffic_section() -> Callable[[], Workload]:
-    st.header("Traffic")
-    mode = st.radio("Source", TRAFFIC_MODES, key="traffic_mode")
-    if mode == "Upload CSV":
+def _traffic_step() -> Traffic:
+    modes = presets.TRAFFIC_MODES
+    mode = st.radio("Source", modes, key="traffic_mode", captions=presets.TRAFFIC_HELP)
+    if mode == modes[1]:
         return _upload_source()
-    if mode == "Synthetic":
+    if mode == modes[2]:
         return _synthetic_source()
     labels = {p.key: p.label for p in presets.PRESETS}
     key = st.selectbox("Preset", list(labels), format_func=labels.__getitem__, key="preset")
@@ -205,136 +225,140 @@ def _traffic_section() -> Callable[[], Workload]:
     return lambda: workload
 
 
-def _slo_section() -> SLO:
-    st.header("Latency target")
-    default = presets.DEFAULT_SLO
-    ttft = st.number_input("TTFT p95 (ms)", 0.1, 600_000.0, default.ttft_ms_p95, key="ttft")
-    tpot = st.number_input("TPOT p95 (ms)", 0.1, 60_000.0, default.tpot_ms_p95, key="tpot")
-    utilization = st.number_input(
-        "Utilization target", 0.05, 1.0, default.utilization_target, 0.05, key="utilization"
-    )
-    return SLO(ttft_ms_p95=ttft, tpot_ms_p95=tpot, utilization_target=utilization)
+def _target_step() -> None:
+    columns = st.columns(len(presets.TARGET_PRESETS))
+    for column, (name, (ttft, tpot)) in zip(columns, presets.TARGET_PRESETS.items(), strict=True):
+        hint = "no target" if ttft is None else f"TTFT {ttft:g} ms, TPOT {tpot:g} ms"
+        values = {"ttft": ttft, "tpot": tpot}
+        column.button(name, key=f"target_{name}", help=hint, on_click=_apply, args=(values,))
+    _number("TTFT p95 (ms)", "ttft", value=None, help=f"{TARGET_HELP['ttft']} Empty: no target.")
+    _number("TPOT p95 (ms)", "tpot", value=None, help=f"{TARGET_HELP['tpot']} Empty: no target.")
+    _number("Utilization target", "utilization", step=0.05, help=TARGET_HELP["utilization"])
 
 
 def _reset_prices() -> None:
-    st.session_state["price_table"] = state.prices_frame(_catalogs()[1])
-    st.session_state["price_version"] = st.session_state.get("price_version", 0) + 1
+    ss["price_table"] = state.prices_frame(_catalogs()[1])
+    ss["price_version"] = ss.get("price_version", 0) + 1
 
 
-def _hardware_section() -> tuple[pd.DataFrame, list[str], list[str]]:
-    st.header("Hardware and prices")
-    gpus, shipped = _catalogs()
-    if "price_table" not in st.session_state:
+def _hardware_step(gpus: Mapping[str, GPUSpec], shipped: tuple[PriceRow, ...]) -> pd.DataFrame:
+    if "price_table" not in ss:
         _reset_prices()
-    priced = sorted({row.gpu_id for row in shipped})
-    gpu_ids = st.multiselect("GPUs", list(gpus), default=priced, key="gpu_ids")
-    table = st.data_editor(
-        st.session_state["price_table"],
-        key=f"price_editor_{st.session_state['price_version']}",
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "gpu_id": st.column_config.SelectboxColumn(options=list(gpus)),
-            "gpu_count": st.column_config.NumberColumn(min_value=1, step=1),
-            "price_usd_per_hour": st.column_config.NumberColumn(format="%.4f", min_value=0.0),
-            "commitment": st.column_config.SelectboxColumn(options=list(COMMITMENTS)),
-            "as_of": st.column_config.DateColumn(),
-        },
-    )
-    oldest, newest = state.as_of_range(shipped)
-    st.caption(
-        f"Shipped prices as of {oldest} to {newest} (USD per instance-hour). Edits are "
-        "validated row by row when you click Plan."
-    )
-    st.button("Reset prices", on_click=_reset_prices)
+    filters = st.container()
+    with st.popover("Edit prices", width="stretch"):
+        table: pd.DataFrame = st.data_editor(
+            ss["price_table"],
+            key=f"price_editor_{ss['price_version']}",
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "gpu_id": st.column_config.SelectboxColumn(options=list(gpus)),
+                "gpu_count": st.column_config.NumberColumn(min_value=1, step=1),
+                "price_usd_per_hour": st.column_config.NumberColumn(format="%.4f", min_value=0.0),
+                "commitment": st.column_config.SelectboxColumn(options=list(COMMITMENTS)),
+                "as_of": st.column_config.DateColumn(),
+            },
+        )
+        oldest, newest = state.as_of_range(shipped)
+        st.caption(
+            f"Shipped prices as of {oldest} to {newest} (USD per instance-hour). Edits are "
+            "validated row by row when you click Plan."
+        )
+        st.button("Reset prices", on_click=_reset_prices)
     providers = sorted({str(p) for p in table["provider"].dropna()} | {r.provider for r in shipped})
-    chosen = st.multiselect("Providers", providers, default=providers, key="providers")
-    return table, gpu_ids, chosen
+    filters.multiselect("Providers", providers, key="providers")
+    filters.multiselect("GPUs", list(gpus), key="gpu_ids")
+    return table
 
 
-def _sidebar() -> Inputs:
-    with st.sidebar:
-        model_id = _model_section()
-        workload = _traffic_section()
-        slo = _slo_section()
-        table, gpu_ids, providers = _hardware_section()
+def _advanced(gpus: Mapping[str, GPUSpec]) -> calibrate.BenchmarkFile | None:
+    st.multiselect("Tensor parallel", presets.TP_CHOICES, key="tp")
+    st.multiselect("dtype", presets.DTYPE_CHOICES, key="dtypes")
+    st.multiselect("max_num_seqs", presets.MAX_NUM_SEQS_CHOICES, key="seqs")
+    _number("max_model_len", "max_model_len", step=256)
+    st.selectbox("Request-size classes", presets.CLASS_CHOICES, key="classes", help=CLASSES_HELP)
+    st.selectbox("Perf backend", presets.PERF_BACKENDS, key="perf_backend")
+    st.selectbox("Solver", presets.SOLVERS, key="solver")
+    _number("Solver time limit (s)", "time_limit")
+    return calibrate.sidebar(gpus, presets.DTYPE_CHOICES)
+
+
+def _step(title: str, compact: bool) -> AbstractContextManager[Any]:
+    """A numbered input step: open in the sidebar; an accordion (step 1 open) when compact."""
+    return st.expander(title, expanded=not compact or title.startswith("1."))
+
+
+def _inputs(
+    gpus: Mapping[str, GPUSpec], shipped: tuple[PriceRow, ...]
+) -> tuple[Traffic, pd.DataFrame, calibrate.BenchmarkFile | None, bool]:
+    """The four steps, Advanced and the Plan button, in the sidebar or (compact) on top."""
+    compact = bool(ss["compact"])
+    with st.container() if compact else st.sidebar:
+        with _step("1. Model", compact):
+            _model_step()
+        with _step("2. Traffic", compact):
+            traffic = _traffic_step()
+        with _step("3. Latency target", compact):
+            _target_step()
+        with _step("4. Hardware and prices", compact):
+            table = _hardware_step(gpus, shipped)
         with st.expander("Advanced"):
-            tp = st.multiselect("Tensor parallel", presets.TP_CHOICES, presets.TP_CHOICES)
-            dtypes = st.multiselect("dtype", presets.DTYPE_CHOICES, presets.DEFAULT_DTYPES)
-            seqs = st.multiselect(
-                "max_num_seqs", presets.MAX_NUM_SEQS_CHOICES, presets.DEFAULT_MAX_NUM_SEQS
-            )
-            max_model_len = st.number_input(
-                "max_model_len", 256, 1_048_576, presets.DEFAULT_MAX_MODEL_LEN, 256
-            )
-            classes = st.selectbox(
-                "Request-size classes", presets.CLASS_CHOICES, key="classes", help=CLASSES_HELP
-            )
-            perf_backend = st.selectbox("Perf backend", presets.PERF_BACKENDS)
-            solver = st.selectbox("Solver", presets.SOLVERS)
-            time_limit = st.number_input(
-                "Solver time limit (s)", 1.0, presets.MAX_TIME_LIMIT_S, presets.DEFAULT_TIME_LIMIT_S
-            )
-        benchmarks = calibrate.sidebar(_catalogs()[0], presets.DTYPE_CHOICES)
-    return Inputs(
-        model_id=model_id,
-        workload=workload,
-        slo=slo,
-        price_table=table,
-        gpu_ids=gpu_ids,
-        providers=providers,
-        tensor_parallel=tp,
-        dtypes=dtypes,
-        max_num_seqs=seqs,
-        max_model_len=int(max_model_len),
-        perf_backend=perf_backend,
-        solver=solver,
-        time_limit_s=time_limit,
-        classes=classes,
-        benchmarks=benchmarks,
-    )
+            benchmarks = _advanced(gpus)
+        clicked = st.button("Plan", type="primary", key="plan", width="stretch")
+    return traffic, table, benchmarks, clicked
+
+
+def _slo() -> SLO:
+    return SLO(ttft_ms_p95=ss["ttft"], tpot_ms_p95=ss["tpot"], utilization_target=ss["utilization"])
 
 
 def _resolve_model(model_id: str) -> ModelSpec:
     if not model_id:
         raise ValidationError("enter a Hugging Face model id (org/name)")
     spec = _model(model_id)
-    st.session_state.setdefault("resolved_models", {})[model_id] = spec
+    ss.setdefault("resolved_models", {})[model_id] = spec
     return spec
 
 
-def _plan(inputs: Inputs, seen: dict[str, WorkloadStats]) -> state.PlanRun:
+def _plan(
+    traffic: Traffic,
+    table: pd.DataFrame,
+    benchmarks: calibrate.BenchmarkFile | None,
+    seen: dict[str, WorkloadStats],
+) -> state.PlanRun:
     gpus, _ = _catalogs()
-    model = _resolve_model(inputs.model_id)
-    rows = calibrate.rows_for_plan(inputs.benchmarks, model, gpus)
-    workload = inputs.workload()
+    model = _resolve_model(_model_id())
+    rows = calibrate.rows_for_plan(benchmarks, model, gpus)
+    workload = traffic()
     stats = seen["stats"] = compute_stats(workload)
     request = state.build_request(
         model=model,
         stats=stats,
-        slo=inputs.slo,
+        slo=_slo(),
         gpus=gpus,
-        prices=state.price_rows(inputs.price_table, gpus),
-        gpu_ids=inputs.gpu_ids,
-        providers=inputs.providers,
-        tensor_parallel=inputs.tensor_parallel,
-        dtypes=inputs.dtypes,
-        max_num_seqs=inputs.max_num_seqs,
-        max_model_len=inputs.max_model_len,
-        perf_backend=inputs.perf_backend,
-        solver=inputs.solver,
-        time_limit_s=inputs.time_limit_s,
-        classes=classify_spec(workload, inputs.classes),
+        prices=state.price_rows(table, gpus),
+        gpu_ids=ss["gpu_ids"],
+        providers=ss["providers"],
+        tensor_parallel=ss["tp"],
+        dtypes=ss["dtypes"],
+        max_num_seqs=ss["seqs"],
+        max_model_len=int(ss["max_model_len"]),
+        perf_backend=ss["perf_backend"],
+        solver=ss["solver"],
+        time_limit_s=ss["time_limit"],
+        classes=classify_spec(workload, ss["classes"]),
     )
     options = state.sim_options(stats)
     key = state.cache_key(request, options, workload, rows)
     return _run(key, request, workload, options, gpus, rows)
 
 
-def _on_plan(inputs: Inputs) -> tuple[str, object]:
+def _on_plan(
+    traffic: Traffic, table: pd.DataFrame, benchmarks: calibrate.BenchmarkFile | None
+) -> tuple[str, object]:
     """Run one plan; returns ("run", PlanRun), ("error", message) or ("warning", message)."""
-    admitted, times = state.admit_plan(st.session_state.get("plan_times", ()), time.time())
-    st.session_state["plan_times"] = times
+    admitted, times = state.admit_plan(ss.get("plan_times", ()), time.time())
+    ss["plan_times"] = times
     if not admitted:
         return "warning", (
             f"You have run {presets.MAX_PLANS_PER_HOUR} plans in the last hour. Please wait a "
@@ -348,7 +372,7 @@ def _on_plan(inputs: Inputs) -> tuple[str, object]:
     result: PlanResult | None = None
     try:
         with st.spinner("Planning the fleet and replaying the traffic..."):
-            run = _plan(inputs, seen)
+            run = _plan(traffic, table, benchmarks, seen)
         result, status, outcome = run.result, run.result.solver.status, ("run", run)
     except InfeasiblePlan as exc:
         status, outcome = "infeasible", ("error", str(exc))
@@ -362,10 +386,10 @@ def _on_plan(inputs: Inputs) -> tuple[str, object]:
         usage_log.append(
             usage_log.usage_record(
                 request_id=request_id,
-                model_id=inputs.model_id,
-                gpu_ids=inputs.gpu_ids,
+                model_id=_model_id(),
+                gpu_ids=ss["gpu_ids"],
                 stats=seen["stats"],
-                slo=inputs.slo,
+                slo=_slo(),
                 result=result,
                 solver_status=status,
                 duration_s=time.perf_counter() - started,
@@ -375,18 +399,21 @@ def _on_plan(inputs: Inputs) -> tuple[str, object]:
 
 
 def main() -> None:
-    """The page: sidebar inputs, one Plan button, and the last outcome."""
+    """The page: header, inputs (sidebar or compact), one Plan button, the last outcome."""
     st.set_page_config(
         page_title=views.PAGE_TITLE,
         page_icon=views.FAVICON,
         layout="wide",
         initial_sidebar_state="auto",
     )
-    inputs = _sidebar()
+    gpus, shipped = _catalogs()
+    _seed(shipped)
     views.header()
-    if st.button("Plan", type="primary", key="plan"):
-        st.session_state["outcome"] = _on_plan(inputs)
-    kind, value = st.session_state.get("outcome", ("none", None))
+    st.toggle("Compact layout", key="compact", on_change=_remember_layout, help=COMPACT_HELP)
+    traffic, table, benchmarks, clicked = _inputs(gpus, shipped)
+    if clicked:
+        ss["outcome"] = _on_plan(traffic, table, benchmarks)
+    kind, value = ss.get("outcome", ("none", None))
     if kind == "run" and isinstance(value, state.PlanRun):
         views.results(value)
         calibrate.report()
@@ -395,7 +422,8 @@ def main() -> None:
     elif kind == "warning":
         st.warning(str(value))
     else:
-        st.info("Choose the inputs in the sidebar, then click Plan.")
+        where = "above" if ss["compact"] else "in the sidebar"
+        st.info(f"Choose the inputs {where}, then click Plan.")
     views.footer()
 
 

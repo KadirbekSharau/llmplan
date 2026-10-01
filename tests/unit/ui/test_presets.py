@@ -68,3 +68,17 @@ def test_only_the_ui_imports_streamlit() -> None:
         for module, top_level in _imports(path):
             if module.split(".")[0] == "streamlit":
                 assert relative == "cli_ui.py" and not top_level, f"{relative} imports {module}"
+
+
+def test_models_are_listed_by_family_and_defaults_fit_their_bounds() -> None:
+    """M9 section 3: the picker groups Llama, Qwen, Mistral, then mixture-of-experts models;
+    every default input lies within its widget's bounds and choices."""
+    groups = [presets.model_group(m) for m in presets.MODEL_CHOICES]
+    assert groups == sorted(groups, key=presets.MODEL_GROUPS.index)
+    assert presets.model_group("Qwen/Qwen3-30B-A3B") == "MoE"
+    assert set(presets.MODEL_CHOICES) == {*presets.FIXTURE_MODELS, *presets.POPULAR_MODELS}
+    for key, (low, high) in presets.BOUNDS.items():
+        assert low <= presets.DEFAULTS[key] <= high  # type: ignore[operator]  # numbers
+    for key, choices in presets.CHOICES.items():
+        default = presets.DEFAULTS[key]
+        assert set(default if isinstance(default, list) else [default]) <= set(choices)

@@ -37,14 +37,15 @@ CLASS_CHOICES = ("2x2", "1", "3x3")  # M7: request-size classes; the first is th
 SOLVERS = ("highs", "cp_sat", "scip", "gurobi")
 
 # Model picker: shipped fixtures (offline) and popular Hugging Face ids, dense and (M8)
-# mixture of experts (fetched only when a plan runs). The gpt2 and deepseek-v3 fixtures are
-# the unsupported-architecture test cases, not offered.
+# mixture of experts (fetched only when a plan runs), listed by family (M9). The gpt2 and
+# deepseek-v3 fixtures are the unsupported-architecture test cases, not offered.
 UNSUPPORTED_FIXTURES = frozenset({"gpt2", "deepseek-v3"})
 FIXTURE_MODELS = tuple(
     f"{FIXTURE_PREFIX}{path.stem}"
     for path in sorted(DEFAULT_FIXTURE_DIR.glob("*.json"))
     if path.stem not in UNSUPPORTED_FIXTURES
 )
+CUSTOM_MODEL = "Other Hugging Face id"
 POPULAR_MODELS = (
     "meta-llama/Llama-3.1-8B-Instruct",
     "meta-llama/Llama-3.1-70B-Instruct",
@@ -56,9 +57,79 @@ POPULAR_MODELS = (
 )
 DEFAULT_MODEL = f"{FIXTURE_PREFIX}llama3-8b"
 
+
+MODEL_GROUPS = ("Llama", "Qwen", "Mistral", "MoE")
+
+
+def model_group(model_id: str) -> str:
+    """The family a model id is listed under (one of `MODEL_GROUPS`)."""
+    lowered = model_id.lower()
+    if "mixtral" in lowered or "-a3b" in lowered:
+        return "MoE"
+    return next(g for g in MODEL_GROUPS if g.lower() in lowered)
+
+
+MODEL_CHOICES = tuple(
+    sorted((*FIXTURE_MODELS, *POPULAR_MODELS), key=lambda m: MODEL_GROUPS.index(model_group(m)))
+)
+
 # Token lengths of the synthetic preset and the synthetic form (`workload synth` defaults).
 DEFAULT_IN_TOKENS = "lognormal:6.2:0.8"
 DEFAULT_OUT_TOKENS = "lognormal:5.5:0.9"
+
+TRAFFIC_MODES = ("Preset sample", "Upload CSV", "Synthetic")
+TRAFFIC_HELP = ("Bundled public traces", "Your trace, parsed in memory", "Seeded Poisson arrivals")
+# Latency-target presets (M9 section 3): TTFT and TPOT p95 in ms; None is no target.
+TARGET_PRESETS: dict[str, tuple[float | None, float | None]] = {
+    "Chat": (500.0, 50.0),
+    "Batch": (None, None),
+    "Strict": (200.0, 30.0),
+}
+# Every input lives in session state under its widget key; these are the defaults (gpu_ids
+# and providers come from the shipped catalog). Share links (`share.py`) and example
+# scenarios write the same keys. Number inputs take their bounds from BOUNDS.
+DEFAULTS: dict[str, object] = {
+    "model_choice": DEFAULT_MODEL,
+    "model_custom": "",
+    "traffic_mode": TRAFFIC_MODES[0],
+    "preset": "azure2024-conv",
+    "syn_rate": 2.0,
+    "syn_duration": 3600.0,
+    "syn_in": DEFAULT_IN_TOKENS,
+    "syn_out": DEFAULT_OUT_TOKENS,
+    "syn_seed": 0,
+    "ttft": DEFAULT_SLO.ttft_ms_p95,
+    "tpot": DEFAULT_SLO.tpot_ms_p95,
+    "utilization": DEFAULT_SLO.utilization_target,
+    "gpu_ids": [],
+    "providers": [],
+    "tp": list(TP_CHOICES),
+    "dtypes": list(DEFAULT_DTYPES),
+    "seqs": list(DEFAULT_MAX_NUM_SEQS),
+    "max_model_len": DEFAULT_MAX_MODEL_LEN,
+    "classes": CLASS_CHOICES[0],
+    "perf_backend": PERF_BACKENDS[0],
+    "solver": SOLVERS[0],
+    "time_limit": DEFAULT_TIME_LIMIT_S,
+}
+BOUNDS: dict[str, tuple[float, float] | tuple[int, int]] = {
+    "syn_rate": (0.01, 1000.0),
+    "syn_duration": (1.0, 86_400.0),
+    "syn_seed": (0, 2**31 - 1),
+    "ttft": (0.1, 600_000.0),
+    "tpot": (0.1, 60_000.0),
+    "utilization": (0.05, 1.0),
+    "max_model_len": (256, 1_048_576),
+    "time_limit": (1.0, MAX_TIME_LIMIT_S),
+}
+CHOICES: dict[str, tuple[object, ...]] = {
+    "tp": TP_CHOICES,
+    "dtypes": DTYPE_CHOICES,
+    "seqs": MAX_NUM_SEQS_CHOICES,
+    "classes": CLASS_CHOICES,
+    "perf_backend": PERF_BACKENDS,
+    "solver": SOLVERS,
+}
 
 
 class SamplePreset(BaseModel):
@@ -100,43 +171,24 @@ SYNTHETIC_PRESET = SyntheticPreset(
 )
 
 _AZURE = "https://github.com/Azure/AzurePublicDataset"
-# Rows and windows: llmplan/data/traces/samples/README.md (scripts/make_samples.py output).
-SAMPLE_PRESETS: tuple[SamplePreset, ...] = (
+# Rows and windows: llmplan/data/traces/samples/README.md (scripts/make_samples.py output);
+# each file is the key with underscores, e.g. azure2024_conv.csv.
+_SAMPLES = (
+    ("azure2024-conv", "Azure 2024 conversation: busiest + median hour (4.6% of rows)", 19_999),
+    ("azure2024-code", "Azure 2024 code: busiest + median hour (5.5% of rows)", 19_999),
+    ("azure2023-conv", "Azure 2023 conversation: whole trace (58 min)", 19_366),
+    ("azure2023-code", "Azure 2023 code: whole trace (57 min)", 8_819),
+    ("burstgpt-1", "BurstGPT: busiest + median hour (60% of rows)", 19_999),
+)
+SAMPLE_PRESETS: tuple[SamplePreset, ...] = tuple(
     SamplePreset(
-        key="azure2024-conv",
-        label="Azure 2024 conversation: busiest + median hour (4.6% of rows)",
-        filename="azure2024_conv.csv",
-        rows=19_999,
-        source_url=_AZURE,
-    ),
-    SamplePreset(
-        key="azure2024-code",
-        label="Azure 2024 code: busiest + median hour (5.5% of rows)",
-        filename="azure2024_code.csv",
-        rows=19_999,
-        source_url=_AZURE,
-    ),
-    SamplePreset(
-        key="azure2023-conv",
-        label="Azure 2023 conversation: whole trace (58 min)",
-        filename="azure2023_conv.csv",
-        rows=19_366,
-        source_url=_AZURE,
-    ),
-    SamplePreset(
-        key="azure2023-code",
-        label="Azure 2023 code: whole trace (57 min)",
-        filename="azure2023_code.csv",
-        rows=8_819,
-        source_url=_AZURE,
-    ),
-    SamplePreset(
-        key="burstgpt-1",
-        label="BurstGPT: busiest + median hour (60% of rows)",
-        filename="burstgpt_1.csv",
-        rows=19_999,
-        source_url="https://github.com/HPMLL/BurstGPT",
-    ),
+        key=key,
+        label=label,
+        filename=f"{key.replace('-', '_')}.csv",
+        rows=rows,
+        source_url="https://github.com/HPMLL/BurstGPT" if key.startswith("burst") else _AZURE,
+    )
+    for key, label, rows in _SAMPLES
 )
 
 PRESETS: tuple[TracePreset, ...] = (*SAMPLE_PRESETS, SYNTHETIC_PRESET)

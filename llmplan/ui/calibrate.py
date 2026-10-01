@@ -29,14 +29,16 @@ Rows = tuple[BenchmarkRow, ...]
 
 @dataclass(frozen=True)
 class BenchmarkFile:
-    """An uploaded benchmark file, kept in memory only (`data` is never shown or logged)."""
+    """An uploaded benchmark file, kept in memory only (`data` is never shown or logged);
+    `run` holds what a vLLM JSON does not record (None for an llmplan CSV)."""
 
     data: bytes = field(repr=False)
-    run: VllmRun
+    run: VllmRun | None
 
 
 def sidebar(gpus: Mapping[str, GPUSpec], dtypes: Sequence[DType]) -> BenchmarkFile | None:
-    """The sidebar section; returns the uploaded file and its run details, or None."""
+    """The calibration section (under Advanced since M9); returns the uploaded file with,
+    for a vLLM JSON, the GPU, tensor parallelism, dtype and version it does not record."""
     st.subheader("Calibrate with your own benchmarks", anchor=ANCHOR)
     st.caption(
         "An llmplan CSV (the benchmark row columns) or the JSON written by `vllm bench serve "
@@ -44,18 +46,17 @@ def sidebar(gpus: Mapping[str, GPUSpec], dtypes: Sequence[DType]) -> BenchmarkFi
         "or logged."
     )
     uploaded = st.file_uploader("Benchmark file", type=["csv", "json"], key="bench_upload")
-    with st.expander("vLLM JSON details (not in the file)"):
-        gpu_id = st.selectbox("GPU", list(gpus), key="bench_gpu")
-        tp = st.number_input("Tensor parallel", 1, 64, 1, key="bench_tp")
-        dtype = st.selectbox("dtype", list(dtypes), key="bench_dtype")
-        version = st.text_input("vLLM version", "unknown", key="bench_version")
     if uploaded is None:
         return None
+    if not uploaded.name.lower().endswith(".json"):
+        return BenchmarkFile(data=uploaded.getvalue(), run=None)
+    st.caption("vLLM JSON details (not in the file)")
     run = VllmRun(
-        gpu_id=str(gpu_id),
-        tensor_parallel=int(tp),
-        dtype=dtype,
-        engine_version=version.strip() or "unknown",
+        gpu_id=str(st.selectbox("GPU", list(gpus), key="bench_gpu")),
+        tensor_parallel=int(st.number_input("Tensor parallel", 1, 64, 1, key="bench_tp")),
+        dtype=st.selectbox("dtype", list(dtypes), key="bench_dtype"),
+        engine_version=st.text_input("vLLM version", "unknown", key="bench_version").strip()
+        or "unknown",
     )
     return BenchmarkFile(data=uploaded.getvalue(), run=run)
 
