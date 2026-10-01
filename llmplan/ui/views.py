@@ -13,16 +13,27 @@ import re
 import pandas as pd
 import streamlit as st
 
-from llmplan import render
+from llmplan import __version__, render
 from llmplan.perf.confidence import ROOFLINE_CONSTANTS, confidence_sentence
+from llmplan.perf.contribute import REPOSITORY_URL
 from llmplan.planner.result import CandidateEval, PlanResult, label
 from llmplan.render.plan_text import baseline_saving, class_comparison_sentence
 from llmplan.render.plots import render_png
 from llmplan.render.timeline_json import timeline_json
 from llmplan.render.vllm_cmd import serve_command
-from llmplan.ui import calibrate, state
+from llmplan.ui import calibrate, state, usage_log
 from llmplan.workload import Workload, WorkloadStats
 
+PAGE_TITLE = "llmplan — GPU fleet planner for LLM inference"
+FAVICON = (  # inline SVG: three bars of a fleet, in the theme's primary colour
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" '
+    'rx="3" fill="#1F6FEB"/><path d="M4 13V7M8 13V3M12 13V9" stroke="#fff" stroke-width="2"/></svg>'
+)
+LEGEND = (
+    "How far to trust the performance estimates: **measured** (a published or uploaded "
+    "benchmark row), **interpolated** (between measured rows), **roofline** (first-principles "
+    "model, about ±30% on throughput)."
+)
 TOP_CANDIDATES = 15
 REJECTED_STYLE = "color: #8a8986"
 _MARKDOWN_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!$|<>~])")
@@ -38,12 +49,22 @@ def _usd(value: float | None) -> str:
 
 
 def header() -> None:
-    """The page title and what the tool does (moved from app.py in M8 to keep it short)."""
-    st.title("llmplan")
+    """Product name, one-line promise, version, GitHub link, and the confidence legend (the
+    help icon next to the title)."""
+    st.title("llmplan", help=LEGEND)
     st.caption(
-        "The cheapest GPU fleet and vLLM settings for your model, traffic and latency target, "
-        "with a replay of the traffic on that fleet. CPU-only planning; nothing connects to a "
-        "GPU or your cluster."
+        "The cheapest GPU fleet and vLLM settings that meet your latency target, proven by "
+        f"replaying your traffic. CPU-only: nothing connects to a GPU or your cluster. "
+        f"v{__version__} · [GitHub]({REPOSITORY_URL})"
+    )
+
+
+def footer() -> None:
+    """The usage-log sentence (M6 section 7), the license, and where the docs live."""
+    st.divider()
+    st.caption(usage_log.FOOTER)
+    st.caption(
+        f"Apache-2.0 · [Documentation]({REPOSITORY_URL}#readme) · [Source]({REPOSITORY_URL})"
     )
 
 

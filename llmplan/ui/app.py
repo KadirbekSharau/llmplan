@@ -376,7 +376,12 @@ def _on_plan(inputs: Inputs) -> tuple[str, object]:
 
 def main() -> None:
     """The page: sidebar inputs, one Plan button, and the last outcome."""
-    st.set_page_config(page_title="llmplan", layout="wide")
+    st.set_page_config(
+        page_title=views.PAGE_TITLE,
+        page_icon=views.FAVICON,
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
     inputs = _sidebar()
     views.header()
     if st.button("Plan", type="primary", key="plan"):
@@ -391,8 +396,7 @@ def main() -> None:
         st.warning(str(value))
     else:
         st.info("Choose the inputs in the sidebar, then click Plan.")
-    st.divider()
-    st.caption(usage_log.FOOTER)
+    views.footer()
 
 
 main()
