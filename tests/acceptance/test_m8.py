@@ -12,7 +12,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
+from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -336,9 +339,38 @@ def test_wheel_smoke(tmp_path: Path) -> None:
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve their module through sys.modules
     spec.loader.exec_module(module)
     work = tmp_path / "work"  # pytest's tmp_path is outside the checkout
     assert not work.resolve().is_relative_to(ROOT)
     fit_json, gpus_text = module.smoke(wheel, work, installer="uv")
     assert json.loads(fit_json)["fits"] is True
     assert "h100-sxm-80gb" in gpus_text
+
+
+# 9.10 Public-repo files.
+def _script(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve their module through sys.modules
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_9_10_public_repo_files() -> None:
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert "Apache License" in license_text
+    assert "Version 2.0" in license_text
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["license"] in ({"text": "Apache-2.0"}, "Apache-2.0")
+    notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
+    assert "BurstGPT" in notice
+    assert "Azure" in notice
+    assert (ROOT / "SECURITY.md").is_file()
+    assert (ROOT / "CONTRIBUTING.md").is_file()
+
+
+def test_9_10_secrets_scan_of_the_full_history_is_clean() -> None:
+    check_secrets = _script("check_secrets")
+    assert check_secrets.scan_history(ROOT) == []

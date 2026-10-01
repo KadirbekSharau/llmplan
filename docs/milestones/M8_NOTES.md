@@ -260,6 +260,41 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   public. Both workflows pass `actionlint` 1.7.12 (installed with `uv tool run --from
   actionlint-py`; shellcheck is not installed here, so embedded shell was not linted) and
   parse with `yaml.safe_load`; the notes `awk` was exercised on a sample changelog.
+- **Step 7 — License files.** `LICENSE` is the canonical Apache License 2.0 text (copied
+  byte for byte from a locally installed package's license file whose SHA-256,
+  `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`, is the published
+  hash of LICENSE-2.0.txt), with the appendix's placeholder line filled in as
+  "Copyright 2026 Kadirbek Sharau". `NOTICE` carries the copyright, says the trace samples
+  are CC-BY-4.0 (not Apache), names the Azure LLM inference traces 2023/2024 and BurstGPT
+  with their repositories and papers, and states the changes made. `pyproject.toml` uses
+  the PEP 639 SPDX form `license = "Apache-2.0"` with `license-files = ["LICENSE",
+  "NOTICE"]` (hatchling writes `License-Expression: Apache-2.0` and ships both files in
+  the wheel), plus authors, keywords, project URLs and classifiers; no `License ::`
+  classifier, because PEP 639 forbids it next to a license expression. README gains the CI
+  and license badges and a License section.
+- **Step 7 — SECURITY.md and CONTRIBUTING.md.** Reports go by email to the founder at the
+  address already public in this repository's commit history (`sharaukadr2001@gmail.com`,
+  the git identity of every commit), or through GitHub's private vulnerability reporting;
+  no bounty; supported versions and what the tool does with the network and uploads.
+  CONTRIBUTING.md is the definition of done in short and the benchmark-row workflow
+  (`vllm bench serve --save-result`, check with `--benchmarks`, the contribute link).
+- **Step 7 — Secrets scan (`scripts/check_secrets.py`).** It reads `git log -p` for the
+  given revisions (default `HEAD`, i.e. the whole history behind the branch) and checks
+  every added or removed line for secret-shaped values keyed on the design's markers:
+  `hf_` + 30 or more alphanumerics, `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_` + 36 or
+  `github_pat_...`, `AKIA`/`ASIA` + 16, `sk-` (incl. `sk-proj-`, `sk-ant-`) + 20 or more,
+  a quoted literal of 16 or more characters assigned to a name ending in `token`, and a
+  literal `Bearer` header. A plain substring grep cannot be the gate: "token" occurs on
+  1,480 changed lines of the history (`input_tokens`, `output_tokens_per_s`,
+  `HF_TOKEN`, ...), and `hf_` on 45 (`hf_classes`, `resolve_hf_class`, the test value
+  `hf_test_value`); both were reviewed, and `ghp_`, `AKIA` and `sk-` occur once each, in
+  M8_DESIGN.md's own sentence naming them. Result on 2026-10-01: **0 hits** for `HEAD`
+  (96 commits at the time) and **0 hits** for `HEAD` plus every `origin/*` branch;
+  `tests/acceptance/test_m8.py::test_9_10_secrets_scan_of_the_full_history_is_clean`
+  repeats the scan on every run (1.5 s), and the CI `check` job now checks out with
+  `fetch-depth: 0` so it sees the full history. Hits would be printed masked (first six
+  characters). `tests/unit/test_check_secrets.py` proves each marker is detected, with fake
+  values assembled at run time so nothing secret-shaped is committed.
 
 ## Deviations from the design doc
 
@@ -285,6 +320,12 @@ order of M8_DESIGN.md section 2; "9b" is the carry-over item.
   family-specific config keys are read or how decode bytes split experts from the rest;
   keeping both in the registry member keeps "a new family is one module plus one import".
   ARCHITECTURE.md sections 3, 4 and 6 updated.
+
+- **Step 7 — The secrets scan matches secret-shaped values, not bare substrings.** The
+  design says "`git log -p | grep` for `token`, `hf_`, `ghp_`, `AKIA`, `sk-`" and that any
+  hit stops the milestone; taken literally every run would stop on `input_tokens`. The
+  script keys each pattern on those markers but requires a credential's shape (see
+  Implementation notes), and the raw substring counts were reviewed by hand and recorded.
 
 ## Questions for founder
 

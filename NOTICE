@@ -1,0 +1,27 @@
+llmplan
+Copyright 2026 Kadirbek Sharau
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Bundled third-party data
+------------------------
+
+llmplan/data/traces/samples/ contains adapted excerpts of public LLM inference traces,
+redistributed under the Creative Commons Attribution 4.0 International license
+(CC-BY-4.0, https://creativecommons.org/licenses/by/4.0/). These files are not covered by
+the Apache License; their CC-BY-4.0 terms apply.
+
+- Azure LLM inference traces 2023 (code, conversation) and 2024 (code, conversation;
+  one week), Microsoft Azure Public Dataset, https://github.com/Azure/AzurePublicDataset,
+  CC-BY-4.0. Cite Patel et al., "Splitwise", ISCA 2024 (2023 traces) and Stojkovic et al.,
+  "DynamoLLM", HPCA 2025 (2024 traces).
+- BurstGPT release v2.0 (BurstGPT_1.csv), https://github.com/HPMLL/BurstGPT, CC-BY-4.0.
+  Cite Wang et al., "BurstGPT", 2024.
+
+Changes made: the busiest and the median-load hour of each trace were selected and
+thinned uniformly to at most 20,000 rows, timestamps converted to relative seconds,
+columns renamed to llmplan's generic CSV format, and rows with invalid token counts
+dropped. Per-file details: llmplan/data/traces/samples/README.md.
+
+The GPU specifications, prices and benchmark figures under llmplan/data/ are facts read
+from the public pages named in each row's source_url, with the date read in as_of.

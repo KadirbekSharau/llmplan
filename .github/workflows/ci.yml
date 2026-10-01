@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # M8 test 9.10 scans the full git history for secrets
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"

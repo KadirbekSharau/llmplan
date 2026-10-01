@@ -1,5 +1,8 @@
 # llmplan — LLM Capacity Planner
 
+[![ci](https://github.com/KadirbekSharau/llmplan/actions/workflows/ci.yml/badge.svg)](https://github.com/KadirbekSharau/llmplan/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 CPU-only planner for self-hosted LLM inference: given a model, traffic, a latency target and
 GPU prices, find the cheapest fleet and replica configuration, and show the utilization
 timeline that proves it. No GPU required to run it.
@@ -217,3 +220,11 @@ scripts/melange_crosscheck.py --melange-dir DIR` on a checkout of melange-releas
 (docs/milestones/M7_NOTES.md). The bundled
 trace samples are regenerated with `uv run python scripts/make_samples.py TRACES_DIR` from
 the full traces (`llmplan traces fetch NAME --dest TRACES_DIR --yes`, outside the repo).
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). The bundled trace samples
+in `llmplan/data/traces/samples/` are excerpts of the Azure LLM inference traces and
+BurstGPT, redistributed under CC-BY-4.0 with attribution in NOTICE. Security reports:
+[SECURITY.md](SECURITY.md). Contributions, including your own benchmark rows:
+[CONTRIBUTING.md](CONTRIBUTING.md).
