@@ -8,7 +8,7 @@ import pytest
 from llmplan.errors import ValidationError
 from llmplan.simulate.events import REQUEST_COLUMNS, EngineRun, run_events
 from llmplan.simulate.replica import ReplicaSpec, replica_specs
-from tests.fake_planner import sim_plan
+from tests.fake_planner import GPUS, sim_plan
 
 ONE_SLOT = ReplicaSpec(
     slots=1,
@@ -50,6 +50,15 @@ def test_replica_specs_from_plan() -> None:
     assert spec.tpot_s == 0.01
     assert spec.kv_bytes_per_token > 0
     assert spec.weight_bytes > 0
+    assert spec.vram_bytes_total is None  # no GPU catalog given
+
+
+def test_replica_specs_vram_total_from_the_gpu_catalog() -> None:
+    plan = sim_plan()
+    (spec,) = replica_specs(plan, GPUS)
+    assert spec.vram_bytes_total == GPUS["fake-a"].vram_bytes * 1  # tensor parallel 1
+    (unknown,) = replica_specs(plan, {"fake-b": GPUS["fake-b"]})
+    assert unknown.vram_bytes_total is None
 
 
 def test_replica_specs_rejects_unservable_plans() -> None:

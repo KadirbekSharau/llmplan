@@ -7,6 +7,9 @@ records behind a timeline), and the models `SimOptions`, `Timeline`, `WindowReco
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from llmplan.catalog.hardware import GPUSpec
 from llmplan.planner.request import SLO
 from llmplan.planner.result import PlanResult
 from llmplan.simulate import routing
@@ -29,6 +32,7 @@ def replay(
     *,
     slo: SLO | None = None,
     options: SimOptions | None = None,
+    gpus: Mapping[str, GPUSpec] | None = None,
 ) -> Timeline:
     """Replay `workload` on the fleet of `plan` and aggregate what happens per window.
 
@@ -36,12 +40,14 @@ def replay(
     fit's KV-token capacity, and service times from the perf estimate (M5_DESIGN.md section
     4); arrivals are routed by `options.routing`. Unset budgets in `options` default to
     `slo.ttft_ms_p95` / `slo.tpot_ms_p95`; the timeline records the resolved options.
-    Traces longer than `options.max_requests` are truncated with a note. Deterministic:
-    the same inputs give byte-identical `model_dump_json()`. Raises `ValidationError` for
-    a plan whose replicas cannot serve (no fit, no perf, no KV cache).
+    Traces longer than `options.max_requests` are truncated with a note. `gpus` is the GPU
+    catalog the plan was made with: it supplies each replica's total VRAM
+    (`ReplicaWindowRecord.vram_bytes_total`; None, with a note, for a GPU it does not hold).
+    Deterministic: the same inputs give byte-identical `model_dump_json()`. Raises
+    `ValidationError` for a plan whose replicas cannot serve (no fit, no perf, no KV cache).
     """
     options = _resolve_budgets(options or SimOptions(), slo)
-    specs, run, n_truncated = _run(plan, workload, options)
+    specs, run, n_truncated = _run(plan, workload, options, gpus)
     return build_timeline(
         run,
         specs,
@@ -49,7 +55,7 @@ def replay(
         plan_cost_usd_per_day=plan.cost_usd_per_day,
         options=options,
         n_truncated=n_truncated,
-        assumptions=_assumptions(plan, options, run, n_truncated),
+        assumptions=_assumptions(plan, options, run, n_truncated, gpus),
     )
 
 
@@ -57,7 +63,7 @@ def replay_requests(
     plan: PlanResult, workload: Workload, *, options: SimOptions | None = None
 ) -> RequestLog:
     """The per-request records (`RequestLog`) of the same replay `replay` aggregates."""
-    return _run(plan, workload, options or SimOptions())[1].requests
+    return _run(plan, workload, options or SimOptions(), None)[1].requests
 
 
 def _resolve_budgets(options: SimOptions, slo: SLO | None) -> SimOptions:
@@ -73,9 +79,12 @@ def _resolve_budgets(options: SimOptions, slo: SLO | None) -> SimOptions:
 
 
 def _run(
-    plan: PlanResult, workload: Workload, options: SimOptions
+    plan: PlanResult,
+    workload: Workload,
+    options: SimOptions,
+    gpus: Mapping[str, GPUSpec] | None,
 ) -> tuple[tuple[ReplicaSpec, ...], EngineRun, int]:
-    specs = replica_specs(plan)
+    specs = replica_specs(plan, gpus)
     frame = workload.frame.iloc[: options.max_requests]
     run = run_events(
         specs,
@@ -88,7 +97,11 @@ def _run(
 
 
 def _assumptions(
-    plan: PlanResult, options: SimOptions, run: EngineRun, n_truncated: int
+    plan: PlanResult,
+    options: SimOptions,
+    run: EngineRun,
+    n_truncated: int,
+    gpus: Mapping[str, GPUSpec] | None,
 ) -> tuple[str, ...]:
     confidences = sorted(
         {r.candidate.perf.confidence for r in plan.replicas if r.candidate.perf is not None}
@@ -119,6 +132,12 @@ def _assumptions(
         notes.append(
             f"{run.n_kv_capped:,} requests need more KV tokens than their replica holds; each "
             "was capped at the replica's KV capacity and ran alone"
+        )
+    unknown = sorted({r.candidate.price_row.gpu_id for r in plan.replicas} - set(gpus or {}))
+    if unknown:
+        notes.append(
+            f"total VRAM unknown for {', '.join(unknown)} (no GPU spec given): "
+            "vram_bytes_total is null and free VRAM is not shown"
         )
     return tuple(notes)
 

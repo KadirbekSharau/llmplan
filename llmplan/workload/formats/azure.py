@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from pathlib import Path
 from typing import ClassVar
 
 from llmplan.workload.formats import register
-from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, read_trace
+from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, TraceSource, read_trace
 from llmplan.workload.schema import Workload
 
 _COLUMNS = {
@@ -38,10 +37,10 @@ class _AzureTrace:
         stamp = first_row[index].strip() if index < len(first_row) else ""
         return bool(_UTC_OFFSET.search(stamp)) == self.offset_timestamps
 
-    def parse(self, path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
+    def parse(self, source: TraceSource, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
         """Parse an Azure trace; timestamps without an offset are read as UTC."""
         return read_trace(
-            path, fmt=self.key, columns=_COLUMNS, time_kind="datetime", max_bytes=max_bytes
+            source, fmt=self.key, columns=_COLUMNS, time_kind="datetime", max_bytes=max_bytes
         )
 
 

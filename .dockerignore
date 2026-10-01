@@ -1,0 +1,21 @@
+# Only pyproject.toml, uv.lock, README.md, llmplan/, data/ and .streamlit/ are needed.
+.git
+.github
+.claude
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+.coverage
+dist
+docs
+scripts
+tests
+Dockerfile
+.dockerignore
+.env
+# Full public traces fetched into the checkout by mistake; the samples are kept.
+data/traces/*.csv

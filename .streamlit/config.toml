@@ -1,0 +1,7 @@
+# Streamlit settings for `streamlit run llmplan/ui/app.py` (Streamlit Community Cloud, Docker).
+# `llmplan ui` passes the same values as flags.
+[server]
+maxUploadSize = 50  # MB; the app also refuses anything over 50,000,000 bytes before parsing
+
+[browser]
+gatherUsageStats = false  # no Streamlit telemetry from visitors' browsers

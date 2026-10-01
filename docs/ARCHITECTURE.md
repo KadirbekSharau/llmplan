@@ -44,7 +44,7 @@ small, readable, and safe.
 - Hugging Face fetches go only to `https://huggingface.co/<org>/<name>/resolve/<rev>/config.json`
   with `org`/`name`/`rev` validated against `^[A-Za-z0-9._-]+$`. Optional token is read from
   the environment (`HF_TOKEN`), never from a file we write, never logged.
-- Uploaded traces are size-capped (default 200 MB), parsed with an explicit column schema,
+- Uploaded traces are size-capped (50 MB in the web UI, checked before parsing; never written to disk), parsed with an explicit column schema,
   and never executed or templated.
 - No secrets in the repo. `data/` contains only public catalog data with source URLs.
 - Dependencies pinned in `uv.lock`; `pip-audit` (or `uv audit`) runs in CI.
@@ -124,7 +124,8 @@ llmplan/
     __init__.py          # load_workload() (M2 public API)
     schema.py            # Workload, Distribution, WorkloadStats
     formats/             # registry: csv (generic_csv.py), azure2023/azure2024 (azure.py),
-                         #   burstgpt; reader.py = chunked parsing + row validation
+                         #   burstgpt; reader.py = chunked parsing + row validation,
+                         #   InMemoryTrace (M6 uploads, never written to disk)
     stats.py             # compute_stats(): peak windows, token percentiles, diurnal
     synth.py             # deterministic synthetic generator
     fetch.py             # consented, checksum-verified public trace download
@@ -159,20 +160,29 @@ llmplan/
     vllm_cmd.py          # M4 `vllm serve` lines (functions, not a registry member)
     timeline_text.py     # M5 `simulate` text
     timeline_json.py     # M5 `simulate` JSON
-    plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png)
+    plots.py             # M5 timeline PNG (matplotlib Agg; imported only for --png and the UI)
     ...
   cli.py                 # typer app; thin
   cli_perf.py            # `llmplan perf` typer sub-app (M3), registered in cli.py
   cli_workload.py        # M2: `workload` and `traces` sub-apps, registered in cli.py
   cli_plan.py            # M4: `llmplan plan` command, registered in cli.py
   cli_simulate.py        # M5: `llmplan simulate` command, registered in cli.py
-  ui/                    # Streamlit app; thin (M6)
+  cli_ui.py              # M6: `llmplan ui` (Streamlit bootstrap in-process; lazy import)
+  ui/                    # M6: Streamlit app; thin. Only app.py and views.py import streamlit
+    app.py               # the page: sidebar inputs, one Plan button, last outcome (< 400 lines)
+    views.py             # result sections rendered from library results
+    state.py             # pure helpers: PlanRequest from inputs, PriceRow validation of the
+                         #   edited table, cache key, run_plan (plan + replay), window, brake
+    presets.py           # SamplePreset/SyntheticPreset, defaults, section 6 limits
+    usage_log.py         # opt-in JSON-lines usage log (LLMPLAN_USAGE_LOG)
 data/
   gpus.yaml
   prices.yaml
   benchmarks/            # M3: <gpu-id>.yaml rows, aliases.yaml
   fixtures/model_configs/*.json
-  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (data files never committed)
+  traces/manifest.yaml   # M2: public trace URLs + SHA-256 (full data files never committed)
+  traces/samples/        # M6: CC-BY-4.0 samples (<= 20,000 rows each) + README; UI presets
+scripts/                 # M6: make_samples.py (cuts the samples), usage_summary.py
 tests/
   unit/<package>/
   acceptance/test_m1.py ...
@@ -484,6 +494,8 @@ class ReplicaWindowRecord(BaseModel, frozen=True):
     queue_depth_max: int
     requests_started: int
     requests_completed: int
+    vram_bytes_total: int | None         # M6: GPU vram_bytes x tensor parallel; None when
+                                         #   replay() was not given the GPU spec
 
 class WindowRecord(BaseModel, frozen=True):
     index: int
@@ -525,6 +537,32 @@ class RequestLog(BaseModel, frozen=True, arbitrary_types_allowed=True):
                                          #   replica_index, kv_tokens (int64)
 ```
 
+```python
+# llmplan/workload/formats/reader.py (M6)
+@dataclass(frozen=True)
+class InMemoryTrace:                     # an upload parsed without touching the disk
+    name: str                            # labels messages and Workload.source
+    data: bytes                          # never in repr/str
+
+# llmplan/ui/state.py (M6)
+class PlanRun(BaseModel, frozen=True):   # the outcome of one Plan click
+    request: PlanRequest
+    result: PlanResult
+    timeline: Timeline
+
+# llmplan/ui/presets.py (M6); TracePreset = SamplePreset | SyntheticPreset
+class SamplePreset(BaseModel, frozen=True):
+    key: str; label: str
+    filename: str                        # under data/traces/samples/, generic csv
+    rows: int                            # gt=0
+    source_url: str
+class SyntheticPreset(BaseModel, frozen=True):
+    key: str; label: str
+    rate_rps: float; duration_s: float   # gt=0
+    input_tokens: Distribution; output_tokens: Distribution
+    seed: int = 0
+```
+
 ---
 
 ## 5. Public API per milestone
@@ -536,12 +574,13 @@ Downstream code calls only these.
 | M1 (implemented) | `llmplan.memory.fit.fit` | `(FitRequest) -> FitResult` |
 | M1 (implemented) | `llmplan.catalog.models.load_model` | `(id: str, *, fetcher: ConfigFetcher \| None) -> ModelSpec` |
 | M1 (implemented) | `llmplan.catalog.hardware.load_gpus / load_prices` | `(path: Path \| None) -> Mapping[str, GPUSpec]` / `(path: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> tuple[PriceRow, ...]` (`gpus` is the FK target; default: shipped catalog) |
-| M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 200 MB cap) |
+| M2 (implemented) | `llmplan.workload.load_workload` | `(source: str \| Path \| InMemoryTrace, *, format: str \| None = None, max_bytes: int = 2 GiB) -> Workload` (`format=None` detects from the header; `max_bytes` lets the M6 upload path pass its 50 MB cap; `InMemoryTrace(name, data)`, added in M6, parses an upload from memory so it is never written to disk) |
 | M3 (implemented) | `llmplan.perf.estimate` | `(model: ModelSpec, gpu: GPUSpec, config: ReplicaConfig, stats: StatsLike, *, backend: str = "auto", backends: Mapping[str, PerfBackend] \| None = None) -> PerfEstimate` (`tp` lives in `config`; `"auto"` tries table then roofline; `backends` overrides registry entries for one call) |
 | M3 (implemented) | `llmplan.perf.benchmarks.load_benchmarks` | `(directory: Path \| None, *, gpus: Mapping[str, GPUSpec] \| None) -> BenchmarkTable` |
 | M4 (implemented) | `llmplan.planner.plan` | `(PlanRequest) -> PlanResult` (raises `InfeasiblePlan` with a reason from the candidate statuses, `SolverError` for an unavailable backend or a time limit without a fleet) |
-| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None) -> Timeline` (window length lives in `options`) |
+| M5 (implemented) | `llmplan.simulate.replay` | `(plan: PlanResult, workload: Workload, *, slo: SLO \| None = None, options: SimOptions \| None = None, gpus: Mapping[str, GPUSpec] \| None = None) -> Timeline` (window length lives in `options`; `gpus`, added in M6, is the catalog the plan used and supplies `vram_bytes_total`) |
 | M5 (implemented) | `llmplan.simulate.replay_requests` | `(plan: PlanResult, workload: Workload, *, options: SimOptions \| None = None) -> RequestLog` (the per-request records of the same replay) |
+| M6 (implemented) | `llmplan.ui.state.run_plan` | `(request: PlanRequest, workload: Workload, options: SimOptions, gpus: Mapping[str, GPUSpec]) -> PlanRun` (plan, then replay with the request's SLO budgets; the web UI's only entry into the planner, cached under `cache_key(request, options, workload)`) |
 
 ---
 
@@ -554,11 +593,11 @@ no entry points, until an external contributor needs one.
 | Registry | Location | Interface | Initial members |
 |---|---|---|---|
 | Architectures | `catalog/architectures` | `hf_classes: Mapping[str, HFClassDefaults]`, `count_params(ModelSpec) -> int`, `embedding_params(ModelSpec) -> int`, `kv_heads_per_gpu(ModelSpec, tp) -> int`; `resolve_hf_class(name)` maps HF class -> key | `llama_like` |
-| Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(path, *, max_bytes) -> Workload`; `detect(path) -> str` | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
+| Trace formats | `workload/formats` | `TraceFormat` protocol: `matches(header, first_row) -> bool`, `parse(source, *, max_bytes) -> Workload`; `detect(source) -> str` (`source` is a `Path` or, since M6, an `InMemoryTrace`) | `csv`, `azure2023`, `azure2024`, `burstgpt` (M2) |
 | Perf backends | `perf/estimate.py` | `PerfBackend` protocol: `name`, `estimate(model, gpu, config, stats) -> PerfEstimate \| None`, `explain(...) -> str` | `roofline`, `table` (M3), `vidur` (optional, not built) |
 | Solver backends | `planner/solve.py` | MathOpt `SolverType` map | `highs` default, `scip`, `cp_sat`, `gurobi` |
 | Routing policies | `simulate/routing.py` | `(outstanding: Sequence[int], index: int) -> int` (replica index) | `least_outstanding`, `round_robin` (M5) |
-| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)`, a plain function for the binary PNG output (`llmplan simulate --png`) |
+| Renderers | `render` | `Renderer` protocol, one method per result type returning `str`: `fit(FitRequest, FitResult)`, `model_info(ModelSpec)`, `gpus(Mapping[str, GPUSpec])` (M1); `perf_estimate(ModelSpec, GPUSpec, ReplicaConfig, StatsLike, PerfEstimate)`, `benchmarks(Sequence[BenchmarkRow])` (M3); `workload_stats(Workload, WorkloadStats)`, `plan(PlanRequest, PlanResult)` (M4); `timeline(Timeline)` (M5); later milestones add a method per new result | `text`, `json` (M1). `render/vllm_cmd.py` (M4) holds plain functions (`serve_command`, `plan_commands`) used by the text renderer and `plan --format vllm`; it renders only replica configs, so it is not a registry member. `render/plots.py` (M5) holds `save_png(Timeline, Path)` and (M6) `render_png(Timeline) -> bytes`, plain functions for the binary PNG output (`llmplan simulate --png`, the web UI) |
 
 ---
 

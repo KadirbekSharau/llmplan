@@ -12,7 +12,13 @@ from pathlib import Path
 
 from llmplan.errors import ValidationError, WorkloadFormatError
 from llmplan.workload.formats import register
-from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, TimeKind, read_header, read_trace
+from llmplan.workload.formats.reader import (
+    DEFAULT_MAX_BYTES,
+    TimeKind,
+    TraceSource,
+    read_header,
+    read_trace,
+)
 from llmplan.workload.schema import Workload
 
 _TOKENS = ("input_tokens", "output_tokens")
@@ -28,16 +34,16 @@ class GenericCsv:
         columns = set(header)
         return columns.issuperset(_TOKENS) and not columns.isdisjoint(_TIMES)
 
-    def parse(self, path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
+    def parse(self, source: TraceSource, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
         """Parse a generic CSV; raises `WorkloadFormatError` if both time columns exist."""
-        header, _ = read_header(path)
+        header, _ = read_header(source)
         present = [c for c in _TIMES if c in header]
         if len(present) == 2:
             raise WorkloadFormatError(
-                f"{path.name}: has both 'arrival_s' and 'timestamp' columns; keep exactly one"
+                f"{source.name}: has both 'arrival_s' and 'timestamp' columns; keep exactly one"
             )
         if not present:
-            raise WorkloadFormatError(f"{path.name}: needs an 'arrival_s' or 'timestamp' column")
+            raise WorkloadFormatError(f"{source.name}: needs an 'arrival_s' or 'timestamp' column")
         columns = {
             "time": present[0],
             "input_tokens": "input_tokens",
@@ -45,7 +51,7 @@ class GenericCsv:
         }
         columns.update({label: label for label in _LABELS if label in header})
         kind: TimeKind = "seconds" if present[0] == "arrival_s" else "datetime"
-        return read_trace(path, fmt="csv", columns=columns, time_kind=kind, max_bytes=max_bytes)
+        return read_trace(source, fmt="csv", columns=columns, time_kind=kind, max_bytes=max_bytes)
 
 
 def write_csv(workload: Workload, path: Path) -> None:

@@ -9,10 +9,12 @@ normalizing arrivals to start at 0.0, and a stable sort.
 from __future__ import annotations
 
 import csv
+import io
 import logging
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import IO, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -32,26 +34,52 @@ MAX_DROPPED_FRACTION = 0.5
 TimeKind = Literal["seconds", "datetime"]
 
 
-def read_header(path: Path) -> tuple[list[str], list[str] | None]:
+@dataclass(frozen=True)
+class InMemoryTrace:
+    """A trace held in memory, such as a web upload, parsed without touching the disk.
+
+    `name` labels error messages and `Workload.source`; `data` is never echoed (it is left
+    out of `repr` and `str`).
+    """
+
+    name: str
+    data: bytes = field(repr=False)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+TraceSource = Path | InMemoryTrace
+
+
+def _open_text(source: TraceSource) -> IO[str]:
+    if isinstance(source, InMemoryTrace):
+        return io.TextIOWrapper(io.BytesIO(source.data), encoding="utf-8-sig", newline="")
+    return source.open(encoding="utf-8-sig", newline="")
+
+
+def read_header(source: TraceSource) -> tuple[list[str], list[str] | None]:
     """Return the header row and the first data row (None if the file has no data rows)."""
-    if not path.is_file():
-        raise ValidationError(f"trace {path} is not a readable file")
+    if isinstance(source, Path) and not source.is_file():
+        raise ValidationError(f"trace {source} is not a readable file")
     try:
-        with path.open(encoding="utf-8-sig", newline="") as handle:
+        with _open_text(source) as handle:
             rows = csv.reader(handle)
             header = next(rows, None)
             first = next(rows, None)
     except (OSError, UnicodeDecodeError, csv.Error) as exc:
-        raise ValidationError(f"cannot read trace {path}: {exc}") from None
+        raise ValidationError(f"cannot read trace {source}: {exc}") from None
     if not header:
-        raise WorkloadFormatError(f"{path.name}: file is empty (no header row)")
+        raise WorkloadFormatError(f"{source.name}: file is empty (no header row)")
     return header, first
 
 
-def _check_size(path: Path, max_bytes: int) -> None:
-    size = path.stat().st_size
+def _check_size(source: TraceSource, max_bytes: int) -> None:
+    size = len(source.data) if isinstance(source, InMemoryTrace) else source.stat().st_size
     if size > max_bytes:
-        raise ValidationError(f"trace {path.name} is {size} bytes; the limit is {max_bytes} bytes")
+        raise ValidationError(
+            f"trace {source.name} is {size} bytes; the limit is {max_bytes} bytes"
+        )
 
 
 def _times(
@@ -74,13 +102,15 @@ def _tokens(series: pd.Series, lo: int) -> tuple[npt.NDArray[np.int64], npt.NDAr
     return np.where(valid, values, 0).astype(np.int64), valid
 
 
-def _chunks(path: Path, columns: Mapping[str, str], kind: TimeKind) -> Iterator[pd.DataFrame]:
+def _chunks(
+    source: TraceSource, columns: Mapping[str, str], kind: TimeKind
+) -> Iterator[pd.DataFrame]:
     dtype = {columns[r]: "string" for r in ("model", "tenant") if r in columns}
     if kind == "datetime":
         dtype[columns["time"]] = "string"
     try:
         yield from pd.read_csv(
-            path,
+            io.BytesIO(source.data) if isinstance(source, InMemoryTrace) else source,
             usecols=list(columns.values()),
             dtype=dtype,
             chunksize=CHUNK_ROWS,
@@ -89,13 +119,18 @@ def _chunks(path: Path, columns: Mapping[str, str], kind: TimeKind) -> Iterator[
         )
     except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
         first_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-        raise WorkloadFormatError(f"{path.name}: cannot parse CSV: {first_line}") from None
+        raise WorkloadFormatError(f"{source.name}: cannot parse CSV: {first_line}") from None
 
 
 def read_trace(
-    path: Path, *, fmt: str, columns: Mapping[str, str], time_kind: TimeKind, max_bytes: int
+    source: TraceSource,
+    *,
+    fmt: str,
+    columns: Mapping[str, str],
+    time_kind: TimeKind,
+    max_bytes: int,
 ) -> Workload:
-    """Parse the CSV at `path` into a `Workload` using `columns` (role -> source column).
+    """Parse the CSV at `source` into a `Workload` using `columns` (role -> source column).
 
     Drops (and counts in `dropped_rows`) rows whose time is unparsable, whose token counts
     are missing, non-integral, out of range (`input_tokens < 1`, `output_tokens < 0`, or
@@ -104,18 +139,18 @@ def read_trace(
     `WorkloadFormatError` when a column is missing, the CSV is malformed, it has no data
     rows, or more than 50% of rows are dropped.
     """
-    header, _ = read_header(path)
-    _check_size(path, max_bytes)
+    header, _ = read_header(source)
+    _check_size(source, max_bytes)
     missing = [c for c in columns.values() if c not in header]
     if missing:
-        raise WorkloadFormatError(f"{path.name}: format {fmt!r} requires column(s) {missing}")
+        raise WorkloadFormatError(f"{source.name}: format {fmt!r} requires column(s) {missing}")
 
     times: list[npt.NDArray[np.int64 | np.float64]] = []
     inputs: list[npt.NDArray[np.int64]] = []
     outputs: list[npt.NDArray[np.int64]] = []
     labels: dict[str, list[pd.Series]] = {r: [] for r in ("model", "tenant") if r in columns}
     total = 0
-    for chunk in _chunks(path, columns, time_kind):
+    for chunk in _chunks(source, columns, time_kind):
         time, time_ok = _times(chunk[columns["time"]], time_kind)
         n_in, in_ok = _tokens(chunk[columns["input_tokens"]], lo=1)
         n_out, out_ok = _tokens(chunk[columns["output_tokens"]], lo=0)
@@ -130,11 +165,11 @@ def read_trace(
     kept = sum(len(t) for t in times)
     dropped = total - kept
     if total == 0:
-        raise WorkloadFormatError(f"{path.name}: no data rows")
+        raise WorkloadFormatError(f"{source.name}: no data rows")
     notes: list[str] = []
     if dropped > MAX_DROPPED_FRACTION * total:
         raise WorkloadFormatError(
-            f"{path.name}: {dropped} of {total} rows are invalid for format {fmt!r}; "
+            f"{source.name}: {dropped} of {total} rows are invalid for format {fmt!r}; "
             "the file is probably another format"
         )
     if dropped > NOTE_DROPPED_FRACTION * total:
@@ -153,7 +188,7 @@ def read_trace(
     )
     log.info("parsed trace format=%s rows=%d dropped=%d", fmt, kept, dropped)
     return Workload(
-        source=str(path), format=fmt, frame=frame, dropped_rows=dropped, notes=tuple(notes)
+        source=str(source), format=fmt, frame=frame, dropped_rows=dropped, notes=tuple(notes)
     )
 
 

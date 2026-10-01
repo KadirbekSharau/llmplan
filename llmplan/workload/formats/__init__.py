@@ -7,11 +7,10 @@ format is a new module plus an import line at the bottom of this file.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from pathlib import Path
 from typing import Protocol
 
 from llmplan.errors import UnknownRegistryKey, WorkloadFormatError
-from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, read_header
+from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, TraceSource, read_header
 from llmplan.workload.schema import Workload
 
 
@@ -20,7 +19,7 @@ class TraceFormat(Protocol):
 
     def matches(self, header: Sequence[str], first_row: Sequence[str] | None) -> bool: ...
 
-    def parse(self, path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload: ...
+    def parse(self, source: TraceSource, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload: ...
 
 
 _REGISTRY: dict[str, TraceFormat] = {}
@@ -50,24 +49,24 @@ def keys() -> tuple[str, ...]:
     return tuple(sorted(_REGISTRY))
 
 
-def detect(path: Path) -> str:
-    """Return the key of the one format whose header matches the file at `path`.
+def detect(source: TraceSource) -> str:
+    """Return the key of the one format whose header matches the trace `source`.
 
     Only the header row and the first data row are read. Raises `WorkloadFormatError` when
     no format or more than one format matches (pass the format explicitly then).
     """
-    header, first_row = read_header(path)
+    header, first_row = read_header(source)
     hits = [key for key, fmt in sorted(_REGISTRY.items()) if fmt.matches(header, first_row)]
     if len(hits) == 1:
         return hits[0]
     if not hits:
         shown = ", ".join(header[:8]) + (", ..." if len(header) > 8 else "")
         raise WorkloadFormatError(
-            f"{path.name}: header ({shown}) matches no trace format ({', '.join(keys())}); "
+            f"{source.name}: header ({shown}) matches no trace format ({', '.join(keys())}); "
             "pass the format explicitly"
         )
     raise WorkloadFormatError(
-        f"{path.name}: header matches several formats ({', '.join(hits)}); "
+        f"{source.name}: header matches several formats ({', '.join(hits)}); "
         "pass the format explicitly"
     )
 

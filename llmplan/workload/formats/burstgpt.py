@@ -9,10 +9,9 @@ of the collection; `Model` maps to `model`.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from llmplan.workload.formats import register
-from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, read_trace
+from llmplan.workload.formats.reader import DEFAULT_MAX_BYTES, TraceSource, read_trace
 from llmplan.workload.schema import Workload
 
 _HEADER = frozenset(
@@ -33,10 +32,10 @@ class BurstGPT:
     def matches(self, header: Sequence[str], first_row: Sequence[str] | None) -> bool:
         return _HEADER.issubset(header)
 
-    def parse(self, path: Path, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
+    def parse(self, source: TraceSource, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Workload:
         """Parse a BurstGPT file; rows with zero response tokens are kept and counted."""
         workload = read_trace(
-            path, fmt="burstgpt", columns=_COLUMNS, time_kind="seconds", max_bytes=max_bytes
+            source, fmt="burstgpt", columns=_COLUMNS, time_kind="seconds", max_bytes=max_bytes
         )
         zero = int((workload.frame["output_tokens"] == 0).sum())
         if zero == 0:

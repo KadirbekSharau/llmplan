@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=2.0",
     "ortools>=9.15",
     "matplotlib>=3.11",
+    "streamlit>=1.64",
 ]
 
 [project.scripts]
@@ -66,5 +67,8 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers -m 'not slow' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
-markers = ["slow: long-running performance tests; excluded by default, select with -m slow"]
+addopts = "-ra --strict-markers -m 'not slow and not docker' --cov=llmplan --cov-report=term-missing --cov-fail-under=90"
+markers = [
+    "slow: long-running performance tests; excluded by default, select with -m slow",
+    "docker: builds the Docker image (needs Docker and network); excluded by default, select with -m docker",
+]
