@@ -3,6 +3,38 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+UI components, experience and responsiveness (M9).
+
+### Added
+
+- Web UI in four numbered steps (model, traffic, latency target, hardware and prices) plus
+  Advanced, with a model chip, captioned traffic sources, Chat / Batch / Strict latency
+  presets, and the price editor behind "Edit prices"; a "Compact layout" toggle (kept in
+  the URL) puts the steps above the results on phones.
+- Answer first: cost per day with the baseline saving, the fleet in one sentence, a
+  confidence badge, the first `vllm serve` line, a share link and the plan JSON; then
+  Fleet, Routing, Timeline, Candidates and Assumptions tabs, tables with five key columns
+  and "Show all columns".
+- Interactive Altair charts (`llmplan/render/charts.py`): the replay's four panels on one
+  zoomable time axis with tooltips and a window selector, and the routing weights per
+  request-size class.
+- Share links that reproduce a plan, validated on load (invalid parameters ignored with a
+  notice); a stale-input chip and a "Plan again" button.
+- Progress steps (resolving model, loading traffic, estimating performance, solving,
+  replaying) with elapsed times; `run_plan(..., progress=)` reports the stage times.
+- Error callouts with a "What to change" hint chosen by the exception type.
+- An empty state with two example scenarios that plan in one click.
+- Page title, favicon and a primary colour for the light and dark themes.
+
+### Changed
+
+- The timeline is an interactive chart; the PNG is a download rendered on click.
+- The calibration upload moved under Advanced; the roofline constants moved to the
+  Assumptions tab.
+- `catalog.models.is_repo_id` is public (the fetcher's id rule, also used by share links).
+
 ## [0.2.0] - Unreleased
 
 Launch readiness (M8). Tagged by the CTO after review; the repository then goes public.

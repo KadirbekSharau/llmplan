@@ -34,21 +34,35 @@ estimates become `measured (your upload)` for that run; nothing is stored.
 
 ## Usage
 
-**`llmplan ui`** — the web UI: pick a model (a shipped fixture or a Hugging Face id), traffic
-(a bundled public trace sample, an uploaded CSV up to 50 MB, or synthetic), a p95
-TTFT/TPOT target and GPU prices (editable), click Plan, and get the cheapest fleet, a
-`vllm serve` line per replica, the utilization timeline of a replay, every candidate with
-its reason, the assumptions, and JSON downloads. Nothing recomputes until Plan is clicked.
+**`llmplan ui`** — the web UI, in four steps: a model (a shipped fixture or a Hugging Face
+id, listed by family, with a parameters / attention / KV-per-token chip), traffic (a
+bundled public trace sample, an uploaded CSV up to 50 MB, or synthetic), a p95 TTFT/TPOT
+latency target (Chat, Batch or Strict presets; an empty field is no target) and GPUs,
+providers and editable prices. Plan shows the progress of each stage, then the answer
+first: the cost per day against the best one-GPU-type fleet, the fleet in one sentence,
+the confidence of the performance model, the first `vllm serve` line, a share link and the
+plan JSON; then tabs: Fleet (a `vllm serve` line per replica type), Routing, Timeline
+(interactive charts of a replay with a window selector, PNG and JSON downloads),
+Candidates (the 15 cheapest; rejected ones with their reason on request) and Assumptions.
+Tables show five columns unless "Show all columns" is on. Nothing recomputes until Plan
+(or an example, or a share link); a chip says when the inputs changed since. Failed plans
+show the library's message and what to change. Before the first plan, two examples plan
+with one click. On a phone, "Compact layout" moves the steps above the results (Streamlit
+cannot detect the screen width; the URL remembers the choice).
+
+Share links: after each plan the page URL (and the link in the answer card) carries its
+inputs, so opening it reproduces the plan; parameters are validated on load and invalid
+ones are ignored with a notice. Uploads and price edits are not part of a link.
+
 Under Advanced, "Request-size classes" (default 2x2) plans each request size on the GPUs
-that meet the target for it; the results then show the routing table, each class's
-replayed latency, and what sizing every replica for the mean request would cost and why
-(it misses the latency target in the replay, under-provisions the long-request class, or
-costs more). A banner above the cost says how much to trust the performance model, and
-"Calibrate with your own benchmarks" in the sidebar takes an llmplan CSV or a `vllm bench
-serve --save-result` JSON (5 MB, 500 rows; for a JSON also the GPU, tensor parallel, dtype
-and vLLM version), validates every row on Plan, lists the rejected ones with the reason,
-and offers a prefilled GitHub issue to contribute the valid rows (nothing is sent
-automatically).
+that meet the target for it; the Routing tab then shows each class's replayed latency, the
+routing weights as a chart, and what sizing every replica for the mean request would cost
+and why (it misses the latency target in the replay, under-provisions the long-request
+class, or costs more). "Calibrate with your own benchmarks", also under Advanced, takes an
+llmplan CSV or a `vllm bench serve --save-result` JSON (5 MB, 500 rows; for a JSON also the
+GPU, tensor parallel, dtype and vLLM version), validates every row on Plan, lists the
+rejected ones with the reason, and offers a prefilled GitHub issue to contribute the valid
+rows (nothing is sent automatically).
 
 ```
 uv run llmplan ui
