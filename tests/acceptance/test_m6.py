@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -164,3 +166,19 @@ def test_9_6_usage_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert record["gpu_ids"] == [H100, "l4-24gb"]
     assert record["cost_usd_per_day"] == pytest.approx(cost_per_day(at), abs=0.005)
     assert record["solver_status"] == "optimal"
+
+
+# 9.7 Docker build. Excluded by default (minutes, and it downloads the base image and the
+# locked packages); run with `uv run pytest -m docker --no-cov`. Skipped without Docker.
+@pytest.mark.docker
+@pytest.mark.skipif(shutil.which("docker") is None, reason="Docker is not installed")
+def test_9_7_docker_build() -> None:
+    root = APP.parents[2]
+    build = subprocess.run(  # noqa: S603  # fixed argv, no shell
+        ["docker", "build", "-t", "llmplan:test", str(root)],  # noqa: S607  # docker on PATH
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        check=False,
+    )
+    assert build.returncode == 0, build.stderr[-2000:]
